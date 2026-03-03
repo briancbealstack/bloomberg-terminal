@@ -71,19 +71,25 @@ function useCandles(ticker) {
   useEffect(() => {
     if (!ticker) return;
     setCandles([]);
-    const to   = Math.floor(Date.now() / 1000);
-    const from = to - 7 * 60 * 60;
-    apiFetch("stock/candle", { symbol: ticker, resolution: "5", from, to })
-      .then(d => {
-        if (d.s === "ok") {
+    // Try today first, then walk back up to 5 days to find last trading session
+    const tryFetch = async (daysBack = 0) => {
+      if (daysBack > 5) return;
+      const to   = Math.floor(Date.now() / 1000) - daysBack * 86400;
+      const from = to - 24 * 60 * 60;
+      try {
+        const d = await apiFetch("stock/candle", { symbol: ticker, resolution: "5", from, to });
+        if (d.s === "ok" && d.t?.length > 0) {
           setCandles(d.t.map((ts, i) => ({
             time:  new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             price: d.c[i],
             vol:   d.v[i],
           })));
+        } else {
+          tryFetch(daysBack + 1);
         }
-      })
-      .catch(() => {});
+      } catch { tryFetch(daysBack + 1); }
+    };
+    tryFetch();
   }, [ticker]);
   return candles;
 }
