@@ -68,12 +68,14 @@ function useAllQuotes(tickers) {
 
 function useCandles(ticker) {
   const [candles, setCandles] = useState([]);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!ticker) return;
     setCandles([]);
+    setLoading(true);
     // Try today first, then walk back up to 5 days to find last trading session
     const tryFetch = async (daysBack = 0) => {
-      if (daysBack > 5) return;
+      if (daysBack > 5) { setLoading(false); return; }
       const to   = Math.floor(Date.now() / 1000) - daysBack * 86400;
       const from = to - 24 * 60 * 60;
       try {
@@ -84,6 +86,7 @@ function useCandles(ticker) {
             price: d.c[i],
             vol:   d.v[i],
           })));
+          setLoading(false);
         } else {
           tryFetch(daysBack + 1);
         }
@@ -91,7 +94,7 @@ function useCandles(ticker) {
     };
     tryFetch();
   }, [ticker]);
-  return candles;
+  return { candles, loading };
 }
 
 function useProfile(ticker) {
@@ -288,7 +291,7 @@ function ChartTooltip({ active, payload, color }) {
   );
 }
 
-function ChartPanel({ ticker, candles, quote, profile }) {
+function ChartPanel({ ticker, candles, candlesLoading, quote, profile }) {
   if (!ticker) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: C.textDim, fontSize: 12 }}>
       ← Select a security
@@ -357,7 +360,7 @@ function ChartPanel({ ticker, candles, quote, profile }) {
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.textDim, fontSize: 11 }}>
-          Loading chart…
+          {candlesLoading ? "Loading chart…" : "No chart data available"}
         </div>
       )}
     </div>
@@ -420,14 +423,21 @@ function NewsPanel({ news }) {
         {news.length === 0 && (
           <div style={{ padding: 16, color: C.textDim, fontSize: 10 }}>Loading news…</div>
         )}
-        {news.map((item, i) => (
-          <a key={i} href={item.url} target="_blank" rel="noreferrer"
+        {news.map((item) => {
+          const d = new Date(item.datetime * 1000);
+          const today = new Date();
+          const isToday = d.toDateString() === today.toDateString();
+          const dateLabel = isToday
+            ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          return (
+          <a key={item.id ?? item.url} href={item.url} target="_blank" rel="noreferrer"
             style={{ display: "block", padding: "8px 10px", borderBottom: `1px solid ${C.border}`, transition: "background 0.1s" }}
             onMouseEnter={e => e.currentTarget.style.background = "#111118"}
             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
             <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
               <span style={{ color: C.textDim, fontSize: 8, fontFamily: "monospace" }}>
-                {new Date(item.datetime * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {dateLabel}
               </span>
               {item.source && (
                 <span style={{ background: C.accentDim, color: C.accent, fontSize: 8, fontWeight: 700, padding: "1px 4px", borderRadius: 2, letterSpacing: 0.5 }}>
@@ -446,7 +456,8 @@ function NewsPanel({ news }) {
               </div>
             )}
           </a>
-        ))}
+        );
+        })}
       </div>
     </div>
   );
@@ -455,8 +466,8 @@ function NewsPanel({ news }) {
 function QuoteDetail({ ticker, quote }) {
   const up = (quote?.d ?? 0) >= 0;
   const cells = quote ? [
-    ["BID",    `$${fmt((quote.c ?? 0) - 0.01)}`],
-    ["ASK",    `$${fmt((quote.c ?? 0) + 0.01)}`],
+    ["LAST",   `$${fmt(quote.c)}`],
+    ["CHANGE", quote.d !== undefined ? `${up ? "+" : ""}${fmt(quote.d)}` : "—"],
     ["OPEN",   `$${fmt(quote.o)}`],
     ["CLOSE",  `$${fmt(quote.pc)}`],
     ["HI",     `$${fmt(quote.h)}`],
@@ -492,6 +503,7 @@ function QuoteDetail({ ticker, quote }) {
 function CommandBar({ onCommand, message }) {
   const [input, setInput] = useState("");
   const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
   const handleKey = (e) => {
     if (e.key === "Enter" && input.trim()) {
       onCommand(input.trim().toUpperCase());
@@ -537,11 +549,17 @@ export default function Terminal() {
   }, []);
 
   const quotes  = useAllQuotes(tickers);
-  const candles = useCandles(selected);
+  const { candles, loading: candlesLoading } = useCandles(selected);
   const profile = useProfile(selected);
   const metrics = useMetrics(selected);
   const news    = useNews();
   const mktStatus = useMarketStatus();
+
+  useEffect(() => {
+    if (!cmdMsg) return;
+    const id = setTimeout(() => setCmdMsg(""), 3000);
+    return () => clearTimeout(id);
+  }, [cmdMsg]);
 
   const handleCommand = (cmd) => {
     if (/^[A-Z.]{1,6}$/.test(cmd)) {
@@ -581,7 +599,7 @@ export default function Terminal() {
 
           {/* Chart */}
           <div style={{ background: C.panel, overflow: "hidden" }}>
-            <ChartPanel ticker={selected} candles={candles} quote={quotes[selected]} profile={profile} />
+            <ChartPanel ticker={selected} candles={candles} candlesLoading={candlesLoading} quote={quotes[selected]} profile={profile} />
           </div>
 
           {/* Fundamentals */}
