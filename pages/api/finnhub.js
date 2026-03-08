@@ -7,6 +7,7 @@ const ALLOWED_ENDPOINTS = new Set([
   "stock/profile2",
   "stock/metric",
   "stock/market-status",
+  "stock/option-chain",
   "news",
 ]);
 
