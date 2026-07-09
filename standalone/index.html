@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAX Widebody Arrivals</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>">
+<style>
+  :root {
+    --page:        #0d0d0d;
+    --surface:     #16161a;
+    --surface-2:   #1d1d22;
+    --ink:         #ffffff;
+    --ink-2:       #c3c2b7;
+    --muted:       #898781;
+    --grid:        #2c2c2a;
+    --baseline:    #383835;
+    --border:      rgba(255,255,255,0.10);
+    --good:        #0ca30c;
+    --warning:     #fab219;
+    --serious:     #ec835a;
+    --critical:    #d03b3b;
+    /* aircraft family series (validated, chip order 747→A380) */
+    --c-747:  #c98500;
+    --c-767:  #d55181;
+    --c-777:  #3987e5;
+    --c-787:  #199e70;
+    --c-a330: #d95926;
+    --c-a340: #9085e9;
+    --c-a350: #008300;
+    --c-a380: #e66767;
+    --c-other:#898781;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--page);
+    color: var(--ink-2);
+    font-family: var(--sans);
+    font-size: 14px;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .brand { font-family: var(--mono); font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: .5px; }
+  .brand em { font-style: normal; color: var(--warning); }
+  .badge {
+    font-family: var(--mono); font-size: 12px; padding: 3px 9px;
+    border: 1px solid var(--border); border-radius: 4px; color: var(--ink);
+    background: var(--surface-2); white-space: nowrap;
+  }
+  #flowBadge { border-color: var(--good); color: var(--good); }
+  #flowBadge.east { border-color: var(--warning); color: var(--warning); }
+  header .spacer { flex: 1; }
+  #clock { font-family: var(--mono); font-size: 15px; color: var(--ink); }
+  #status { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  #status.err { color: var(--critical); }
+  button {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
+    padding: 4px 10px; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--muted); }
+  button.on { color: var(--ink); border-color: var(--muted); background: #26262c; }
+
+  nav.tabs { display: flex; gap: 4px; padding: 8px 16px 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+  nav.tabs button {
+    border-radius: 6px 6px 0 0; border-bottom: none; padding: 7px 16px; font-size: 13px;
+  }
+  nav.tabs button.on { background: var(--page); color: var(--ink); }
+
+  #filters {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 16px;
+  }
+  #filters .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 12px;
+    padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--ink-2); cursor: pointer; user-select: none;
+  }
+  .chip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dot); }
+  .chip .n { color: var(--muted); }
+  .chip.off { opacity: .38; }
+  .chip:hover { border-color: var(--muted); }
+
+  main { flex: 1; padding: 0 16px 16px; min-height: 0; }
+  #liveView { display: grid; grid-template-columns: minmax(360px, 480px) 1fr; gap: 16px; height: 100%; align-items: start; }
+  #liveView .panel:last-child { max-height: 100%; }
+  @media (max-width: 980px) { #liveView { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em;
+  }
+  .panel-head .spacer { flex: 1; }
+
+  #radarWrap { position: relative; aspect-ratio: 1; }
+  #radar { width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #tip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: var(--surface-2); border: 1px solid var(--muted); border-radius: 6px;
+    padding: 8px 10px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    color: var(--ink-2); max-width: 240px; box-shadow: 0 4px 16px rgba(0,0,0,.5);
+  }
+  #tip b { color: var(--ink); }
+
+  .tbl-scroll { overflow: auto; flex: 1; }
+  table { border-collapse: collapse; width: 100%; }
+  th {
+    position: sticky; top: 0; background: var(--surface); z-index: 2;
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em;
+    text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--baseline);
+    white-space: nowrap;
+  }
+  td {
+    padding: 8px 10px; border-bottom: 1px solid var(--grid);
+    font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px;
+    white-space: nowrap; vertical-align: middle;
+  }
+  td .sub { display: block; font-family: var(--sans); font-size: 11px; color: var(--muted); margin-top: 1px; white-space: normal; }
+  td.num { text-align: right; }
+  th.num { text-align: right; }
+  tr.sel td { background: #22222a; }
+  tr:hover td { background: #1c1c22; }
+  .fam { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); }
+  .fam .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .flight { color: var(--ink); font-weight: 700; }
+  .phase { font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
+  .phase.FINAL   { color: var(--good); border-color: var(--good); }
+  .phase.LANDED  { color: var(--page); background: var(--good); border-color: var(--good); font-weight: 700; }
+  .phase.DESCENT { color: var(--ink-2); }
+  .rwy { color: var(--ink); font-weight: 700; }
+  .eta-min { color: var(--muted); }
+  .dim td { opacity: .45; }
+  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  #schedView { display: none; height: 100%; }
+  #schedView .panel { height: 100%; }
+  .setup {
+    margin: 14px; padding: 14px; border: 1px dashed var(--baseline); border-radius: 8px;
+    font-size: 13px; line-height: 1.65; color: var(--ink-2); max-width: 720px;
+  }
+  .setup code { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+  .setup input {
+    font-family: var(--mono); font-size: 13px; color: var(--ink);
+    background: var(--page); border: 1px solid var(--baseline); border-radius: 4px;
+    padding: 5px 8px; width: 300px; max-width: 100%;
+  }
+  .st { font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid; font-family: var(--mono); }
+  .st.active    { color: var(--good); border-color: var(--good); }
+  .st.landed    { color: var(--muted); border-color: var(--baseline); }
+  .st.scheduled { color: var(--ink-2); border-color: var(--baseline); }
+  .st.delayed   { color: var(--serious); border-color: var(--serious); }
+  .st.cancelled { color: var(--critical); border-color: var(--critical); }
+  .likely { color: var(--warning); font-size: 11px; }
+  tr.day td {
+    font-family: var(--sans); font-size: 11px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .1em; background: var(--surface-2);
+    padding: 5px 10px;
+  }
+
+  footer { padding: 10px 16px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+  footer b { color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">LAX <em>WIDEBODY</em> ARRIVALS</div>
+  <div class="badge" id="flowBadge">WEST FLOW</div>
+  <div class="badge" id="acCount">— inbound</div>
+  <div class="spacer"></div>
+  <div id="status">connecting…</div>
+  <button id="pauseBtn" title="pause auto-refresh">⏸ pause</button>
+  <div id="clock">--:--:--</div>
+</header>
+
+<nav class="tabs">
+  <button id="tabLive" class="on">LIVE INBOUND</button>
+  <button id="tabSched">SCHEDULE BOARD</button>
+</nav>
+
+<div id="filters">
+  <span class="lbl">Fleet filter</span>
+  <!-- chips injected -->
+</div>
+
+<main>
+  <div id="liveView">
+    <div class="panel">
+      <div class="panel-head">
+        Approach scope · LAX
+        <div class="spacer"></div>
+        <button data-range="100">100 NM</button>
+        <button data-range="250" class="on">250 NM</button>
+      </div>
+      <div id="radarWrap">
+        <canvas id="radar"></canvas>
+        <div id="tip"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">Inbound widebodies <span id="liveSub" style="text-transform:none;letter-spacing:0"></span><div class="spacer"></div><span style="text-transform:none;letter-spacing:0">sorted by ETA</span></div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>Flight</th><th>Aircraft</th><th>From</th>
+            <th class="num">Dist</th><th class="num">Alt</th><th class="num">GS</th>
+            <th class="num">ETA</th><th>Rwy*</th><th>Phase</th>
+          </tr></thead>
+          <tbody id="liveBody"><tr><td colspan="9"><div class="empty">Waiting for first ADS-B sweep…</div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="schedView">
+    <div class="panel">
+      <div class="panel-head">
+        Scheduled arrivals · next 24 h
+        <div class="spacer"></div>
+        <label style="text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="likelyToggle" checked> include likely widebodies (type unconfirmed)
+        </label>
+        <button id="schedRefresh" title="bypasses the 1-hour cache — spends ~6 API requests">↻ refresh</button>
+      </div>
+      <div id="schedContent" class="tbl-scroll"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <b>Data:</b> live positions via adsb.lol / airplanes.live (community ADS-B, no key needed); routes via adsb.lol route DB; schedules via aviationstack (optional key).
+  &nbsp;·&nbsp; <b>*Runway is a prediction</b>, from detected flow + approach corridor (normal LAX west ops land 24R north / 25L south; inner runways 24L/25R are used at peaks; overnight over-ocean and Santa Ana east ops land on the 06/07s) — not an ATC assignment.
+  &nbsp;·&nbsp; ETA = distance ÷ ground speed. All times America/Los_Angeles.
+</footer>
+
+<script>
+"use strict";
+/* ============================== CONSTANTS ============================== */
+const LAX = { lat: 33.9425, lon: -118.4081 };
+const NM_PER_DEG = 60;
+const TZ = "America/Los_Angeles";
+const RUNWAY_TRUE = 261;           // true course of 24/25 finals (249 mag + ~12E var)
+const MIDFIELD = { lat: 33.9437, lon: -118.4081 };  // between north/south complexes
+
+// ICAO type designator → [family, marketing name]
+const WB = {
+  B741:["747","747-100"], B742:["747","747-200"], B743:["747","747-300"],
+  B744:["747","747-400"], B748:["747","747-8"],   B74S:["747","747SP"],
+  B74R:["747","747SR"],   BLCF:["747","747 Dreamlifter"], VC25:["747","VC-25A"],
+  B762:["767","767-200"], B763:["767","767-300"], B764:["767","767-400"],
+  B772:["777","777-200ER"], B77L:["777","777-200LR / 777F"],
+  B773:["777","777-300"],  B77W:["777","777-300ER"],
+  B778:["777","777-8"],    B779:["777","777-9"],
+  B788:["787","787-8"], B789:["787","787-9"], B78X:["787","787-10"],
+  A332:["A330","A330-200"], A333:["A330","A330-300"],
+  A338:["A330","A330-800neo"], A339:["A330","A330-900neo"],
+  A342:["A340","A340-200"], A343:["A340","A340-300"],
+  A345:["A340","A340-500"], A346:["A340","A340-600"],
+  A359:["A350","A350-900"], A35K:["A350","A350-1000"],
+  A388:["A380","A380-800"],
+  MD11:["OTHER","MD-11"], DC10:["OTHER","DC-10 / KC-10"], MD10:["OTHER","MD-10"],
+  A306:["OTHER","A300-600"], A30B:["OTHER","A300"], A310:["OTHER","A310"],
+  IL96:["OTHER","Il-96"], A124:["OTHER","An-124"], C17:["OTHER","C-17 Globemaster III"],
+  C5M:["OTHER","C-5M Galaxy"], E767:["OTHER","E-767"]
+};
+// IATA equipment codes → ICAO (for schedule feeds)
+const IATA_TYPE = {
+  "744":"B744","748":"B748","74F":"B744","74Y":"B744","74N":"B748",
+  "772":"B772","77L":"B77L","773":"B773","77W":"B77W","77X":"B77L","77F":"B77L","779":"B779",
+  "788":"B788","789":"B789","781":"B78X",
+  "332":"A332","333":"A333","338":"A338","339":"A339","33X":"A339",
+  "342":"A342","343":"A343","345":"A345","346":"A346",
+  "359":"A359","351":"A35K","35K":"A35K",
+  "388":"A388","38F":"A388",
+  "762":"B762","763":"B763","764":"B764","76F":"B763","76W":"B763",
+  "M11":"MD11","M1F":"MD11","D10":"DC10","306":"A306","310":"A310","AB6":"A306"
+};
+const FAMILIES = ["747","767","777","787","A330","A340","A350","A380","OTHER"];
+const FAM_COLOR = {
+  "747":"#c98500","767":"#d55181","777":"#3987e5","787":"#199e70",
+  "A330":"#d95926","A340":"#9085e9","A350":"#008300","A380":"#e66767","OTHER":"#898781"
+};
+
+// ICAO airline callsign prefix → name (common widebody operators at LAX)
+const AIRLINES = {
+  UAL:"United", AAL:"American", DAL:"Delta", HAL:"Hawaiian", ACA:"Air Canada",
+  ANA:"All Nippon", JAL:"Japan Airlines", KAL:"Korean Air", AAR:"Asiana",
+  CPA:"Cathay Pacific", CES:"China Eastern", CSN:"China Southern", CCA:"Air China",
+  CXA:"XiamenAir", EVA:"EVA Air", CAL:"China Airlines", SIA:"Singapore Airlines",
+  HVN:"Vietnam Airlines", PAL:"Philippine Airlines", THA:"Thai Airways",
+  MAS:"Malaysia Airlines", GIA:"Garuda", QFA:"Qantas", ANZ:"Air New Zealand",
+  FJI:"Fiji Airways", THT:"Air Tahiti Nui", UAE:"Emirates", ETD:"Etihad",
+  QTR:"Qatar Airways", SVA:"Saudia", ELY:"El Al", THY:"Turkish", MSR:"EgyptAir",
+  ETH:"Ethiopian", BAW:"British Airways", VIR:"Virgin Atlantic", AFR:"Air France",
+  DLH:"Lufthansa", KLM:"KLM", IBE:"Iberia", ITY:"ITA Airways", SWR:"Swiss",
+  AUA:"Austrian", EIN:"Aer Lingus", FIN:"Finnair", LOT:"LOT Polish", SAS:"SAS",
+  ICE:"Icelandair", CFG:"Condor", AMX:"Aeroméxico", LAN:"LATAM", LPE:"LATAM Perú",
+  TAM:"LATAM Brasil", FDX:"FedEx", UPS:"UPS", GTI:"Atlas Air", PAC:"Polar Air Cargo",
+  CLX:"Cargolux", CKS:"Kalitta Air", NCA:"Nippon Cargo", SQC:"Singapore Cargo",
+  CAO:"Air China Cargo", CKK:"China Cargo", ABW:"AirBridgeCargo", RCH:"USAF AMC"
+};
+// airlines whose LAX service is (almost) always widebody — used only for the
+// "likely widebody" flag on schedule rows whose equipment field is missing
+const WB_AIRLINES = new Set(["NH","JL","KE","OZ","CX","CI","BR","MU","CZ","CA","MF",
+  "SQ","PR","VN","TG","MH","GA","QF","NZ","FJ","TN","EK","EY","QR","SV","LY","TK",
+  "MS","ET","BA","VS","AF","LH","KL","IB","AZ","LX","EI","FI","AY","LO","SK","DE",
+  "HA","AM","LA"]);
+
+// IATA → [lat, lon, city] — origins with regular widebody service to LAX
+const AIRPORTS = {
+  NRT:[35.76,140.39,"Tokyo Narita"], HND:[35.55,139.78,"Tokyo Haneda"], KIX:[34.43,135.24,"Osaka"],
+  ICN:[37.46,126.44,"Seoul"], PEK:[40.08,116.58,"Beijing"], PKX:[39.51,116.41,"Beijing Daxing"],
+  PVG:[31.14,121.81,"Shanghai"], CAN:[23.39,113.30,"Guangzhou"], SZX:[22.64,113.81,"Shenzhen"],
+  CTU:[30.57,103.95,"Chengdu"], CKG:[29.72,106.64,"Chongqing"], XIY:[34.44,108.75,"Xi'an"],
+  HGH:[30.23,120.43,"Hangzhou"], TPE:[25.08,121.23,"Taipei"], HKG:[22.31,113.91,"Hong Kong"],
+  MNL:[14.51,121.02,"Manila"], CEB:[10.31,123.98,"Cebu"], SGN:[10.82,106.65,"Ho Chi Minh City"],
+  HAN:[21.22,105.81,"Hanoi"], BKK:[13.69,100.75,"Bangkok"], SIN:[1.36,103.99,"Singapore"],
+  KUL:[2.75,101.71,"Kuala Lumpur"], CGK:[-6.13,106.66,"Jakarta"], DEL:[28.57,77.10,"Delhi"],
+  BOM:[19.09,72.87,"Mumbai"],
+  SYD:[-33.95,151.18,"Sydney"], MEL:[-37.67,144.84,"Melbourne"], BNE:[-27.38,153.12,"Brisbane"],
+  AKL:[-37.01,174.79,"Auckland"], CHC:[-43.49,172.53,"Christchurch"], NAN:[-17.76,177.44,"Nadi"],
+  PPT:[-17.56,-149.61,"Papeete"], RAR:[-21.20,-159.81,"Rarotonga"],
+  DXB:[25.25,55.36,"Dubai"], AUH:[24.44,54.65,"Abu Dhabi"], DOH:[25.27,51.61,"Doha"],
+  JED:[21.68,39.16,"Jeddah"], RUH:[24.96,46.70,"Riyadh"], TLV:[32.01,34.89,"Tel Aviv"],
+  IST:[41.26,28.74,"Istanbul"], CAI:[30.12,31.41,"Cairo"], ADD:[8.98,38.80,"Addis Ababa"],
+  LHR:[51.47,-0.46,"London Heathrow"], LGW:[51.15,-0.19,"London Gatwick"],
+  CDG:[49.01,2.55,"Paris CDG"], AMS:[52.31,4.76,"Amsterdam"], FRA:[50.03,8.57,"Frankfurt"],
+  MUC:[48.35,11.79,"Munich"], ZRH:[47.46,8.55,"Zürich"], VIE:[48.11,16.57,"Vienna"],
+  CPH:[55.62,12.65,"Copenhagen"], ARN:[59.65,17.92,"Stockholm"], HEL:[60.32,24.96,"Helsinki"],
+  KEF:[63.99,-22.62,"Reykjavík"], WAW:[52.17,20.97,"Warsaw"], MAD:[40.47,-3.57,"Madrid"],
+  BCN:[41.30,2.08,"Barcelona"], LIS:[38.77,-9.13,"Lisbon"], FCO:[41.80,12.24,"Rome"],
+  MXP:[45.63,8.72,"Milan"], ATH:[37.94,23.94,"Athens"], DUB:[53.43,-6.27,"Dublin"],
+  MAN:[53.35,-2.28,"Manchester"], LUX:[49.63,6.20,"Luxembourg"],
+  JFK:[40.64,-73.78,"New York JFK"], EWR:[40.69,-74.17,"Newark"], BOS:[42.36,-71.01,"Boston"],
+  IAD:[38.95,-77.46,"Washington Dulles"], ATL:[33.64,-84.43,"Atlanta"], ORD:[41.97,-87.90,"Chicago"],
+  DFW:[32.90,-97.04,"Dallas–Fort Worth"], IAH:[29.98,-95.34,"Houston"], MIA:[25.79,-80.29,"Miami"],
+  SFO:[37.62,-122.38,"San Francisco"], SEA:[47.45,-122.31,"Seattle"],
+  HNL:[21.32,-157.92,"Honolulu"], OGG:[20.90,-156.43,"Maui"], KOA:[19.74,-156.05,"Kona"],
+  LIH:[21.98,-159.34,"Kauai"], ANC:[61.17,-149.99,"Anchorage"], YVR:[49.19,-123.18,"Vancouver"],
+  YYZ:[43.68,-79.63,"Toronto"], MEX:[19.44,-99.07,"Mexico City"], GDL:[20.52,-103.31,"Guadalajara"],
+  LIM:[-12.02,-77.11,"Lima"], SCL:[-33.39,-70.79,"Santiago"], GRU:[-23.43,-46.47,"São Paulo"],
+  EZE:[-34.82,-58.54,"Buenos Aires"], MEM:[35.04,-89.98,"Memphis"], SDF:[38.17,-85.74,"Louisville"],
+  CVG:[39.05,-84.66,"Cincinnati"], OAK:[37.72,-122.22,"Oakland"], LAX:[33.94,-118.41,"Los Angeles"]
+};
+
+// rough SoCal coastline + islands for scope orientation
+const COAST = [
+  [34.45,-120.47],[34.40,-119.85],[34.41,-119.69],[34.34,-119.47],[34.27,-119.29],
+  [34.14,-119.20],[34.08,-119.06],[34.03,-118.90],[34.03,-118.79],[34.04,-118.68],
+  [34.01,-118.50],[33.96,-118.46],[33.92,-118.43],[33.87,-118.41],[33.80,-118.43],
+  [33.77,-118.42],[33.71,-118.29],[33.75,-118.23],[33.75,-118.19],[33.72,-118.07],
+  [33.65,-118.00],[33.60,-117.90],[33.55,-117.80],[33.46,-117.70],[33.38,-117.60],
+  [33.27,-117.45],[33.19,-117.39],[33.09,-117.31],[32.95,-117.26],[32.85,-117.28],
+  [32.75,-117.25],[32.67,-117.24],[32.53,-117.12]
+];
+const ISLANDS = [
+  [[33.48,-118.60],[33.44,-118.51],[33.39,-118.42],[33.30,-118.31],[33.34,-118.40],[33.41,-118.53],[33.48,-118.60]],
+  [[34.05,-119.92],[34.00,-119.75],[34.00,-119.55],[34.01,-119.36]],
+  [[33.02,-118.60],[32.82,-118.35]],
+  [[33.28,-119.54],[33.22,-119.43]]
+];
+const NEARBY = { SAN:[32.734,-117.190], SNA:[33.676,-117.868], LGB:[33.818,-118.152],
+  ONT:[34.056,-117.601], BUR:[34.201,-118.359], SBA:[34.426,-119.840],
+  PSP:[33.830,-116.507], LAS:[36.080,-115.152] };
+
+/* ============================== GEO HELPERS ============================== */
+const rad = d => d * Math.PI / 180;
+function distNm(lat1, lon1, lat2, lon2) {
+  const dLat = rad(lat2-lat1), dLon = rad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+  return 2 * Math.asin(Math.sqrt(a)) * 3440.065;
+}
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const y = Math.sin(rad(lon2-lon1)) * Math.cos(rad(lat2));
+  const x = Math.cos(rad(lat1))*Math.sin(rad(lat2)) - Math.sin(rad(lat1))*Math.cos(rad(lat2))*Math.cos(rad(lon2-lon1));
+  return (Math.atan2(y, x) * 180/Math.PI + 360) % 360;
+}
+const angleDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+// local flat-earth coords in NM relative to a ref point (E, N)
+function localNm(lat, lon, ref) {
+  return {
+    e: (lon - ref.lon) * NM_PER_DEG * Math.cos(rad(ref.lat)),
+    n: (lat - ref.lat) * NM_PER_DEG
+  };
+}
+
+/* ============================== STATE ============================== */
+const state = {
+  flights: [],        // inbound widebodies for the table
+  ghosts: [],         // other airborne widebodies in range (radar context)
+  flow: "W",          // W | E
+  flowAuto: true,
+  range: 250,
+  paused: false,
+  sel: null,          // selected hex
+  filters: new Set(JSON.parse(localStorage.getItem("laxwb_filters") || "null") || FAMILIES),
+  lastOk: 0,
+  nextPoll: 0
+};
+const routes = new Map();   // callsign → {dest, orig:{iata,city,lat,lon}} | {unknown:true}
+const landed = new Map();   // hex → {flight, at}
+const POLL_MS = 20000;
+
+/* ============================== DATA FETCH ============================== */
+const AC_SOURCES = [
+  r => `https://api.adsb.lol/v2/point/${LAX.lat}/${LAX.lon}/${r}`,
+  r => `https://api.airplanes.live/v2/point/${LAX.lat}/${LAX.lon}/${r}`
+];
+let srcIdx = 0;
+
+async function fetchAircraft() {
+  for (let i = 0; i < AC_SOURCES.length; i++) {
+    const idx = (srcIdx + i) % AC_SOURCES.length;
+    try {
+      const r = await fetch(AC_SOURCES[idx](250), { signal: AbortSignal.timeout(9000) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if (!Array.isArray(j.ac)) throw new Error("bad payload");
+      srcIdx = idx;
+      return j.ac;
+    } catch (e) { /* try next source */ }
+  }
+  throw new Error("all ADS-B sources failed");
+}
+
+async function fetchRoutes(list) {
+  try {
+    const r = await fetch("https://api.adsb.lol/api/0/routeset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ planes: list.map(a => ({ callsign: a.cs, lat: a.lat, lng: a.lon })) }),
+      signal: AbortSignal.timeout(9000)
+    });
+    if (!r.ok) return;
+    const arr = await r.json();
+    for (const it of (Array.isArray(arr) ? arr : [])) {
+      if (!it || !it.callsign) continue;
+      const codes = (it._airport_codes_iata || it.airport_codes || "");
+      if (!codes || codes === "unknown") { routes.set(it.callsign, { unknown: true }); continue; }
+      const legs = codes.split("-").filter(Boolean);
+      const dest = legs[legs.length - 1];
+      const iLax = legs.lastIndexOf("LAX");
+      const origCode = iLax > 0 ? legs[iLax - 1] : legs[0];
+      const det = (it.airports || []).find(ap => ap.iata === origCode || ap.icao === origCode);
+      routes.set(it.callsign, {
+        dest,
+        orig: {
+          iata: origCode,
+          city: det ? (det.location || det.name || "") : (AIRPORTS[origCode] ? AIRPORTS[origCode][2] : ""),
+          lat: det ? det.lat : (AIRPORTS[origCode] ? AIRPORTS[origCode][0] : null),
+          lon: det ? det.lon : (AIRPORTS[origCode] ? AIRPORTS[origCode][1] : null)
+        }
+      });
+    }
+  } catch (e) { /* route lookup is best-effort */ }
+}
+
+/* ============================== CLASSIFICATION ============================== */
+function detectFlow(acs) {
+  if (!state.flowAuto) return;
+  let w = 0, e = 0;
+  for (const a of acs) {
+    if (a.lat == null || typeof a.alt_baro !== "number") continue;
+    if (a.alt_baro > 6000 || !(a.gs > 90) || a.track == null) continue;
+    if (distNm(a.lat, a.lon, LAX.lat, LAX.lon) > 14) continue;
+    if (angleDiff(a.track, RUNWAY_TRUE) < 35) w++;
+    else if (angleDiff(a.track, (RUNWAY_TRUE + 180) % 360) < 35) e++;
+  }
+  if (w + e >= 2) state.flow = w >= e ? "W" : "E";
+}
+
+// predicted arrival runway + phase for one aircraft
+function predictRunway(a, dist) {
+  const flow = state.flow;
+  const hdgIn = flow === "W" ? RUNWAY_TRUE : (RUNWAY_TRUE + 180) % 360; // travel direction on final
+  const p = localNm(a.lat, a.lon, MIDFIELD);
+  const h = rad(hdgIn);
+  const along = p.e * Math.sin(h) + p.n * Math.cos(h);   // + means past the field
+  const cross = p.e * Math.cos(h) - p.n * Math.sin(h);   // + means right of course
+  const aligned = a.track != null && angleDiff(a.track, hdgIn) < 30;
+  const onFinal = aligned && along < 0 && along > -26 && Math.abs(cross) < 2.5 &&
+                  typeof a.alt_baro === "number" && a.alt_baro < 9500;
+  let north;
+  if (onFinal) {
+    // right of a 261° course is the north side (west flow); flipped in east flow
+    north = flow === "W" ? cross > 0 : cross < 0;
+  } else {
+    const b = bearingDeg(LAX.lat, LAX.lon, a.lat, a.lon); // direction traffic is coming from
+    north = (b >= 245 || b < 60);
+  }
+  const rwy = flow === "W" ? (north ? "24R" : "25L") : (north ? "06L/R" : "07L/R");
+  return { rwy, onFinal };
+}
+
+function phaseOf(a, dist, onFinal) {
+  if (a.alt_baro === "ground") return "LANDED";
+  if (onFinal) return "FINAL";
+  if (typeof a.baro_rate === "number" && a.baro_rate < -300 && typeof a.alt_baro === "number" && a.alt_baro < 20000) return "DESCENT";
+  if (dist < 45 && typeof a.alt_baro === "number" && a.alt_baro < 15000) return "APPROACH";
+  return "ENROUTE";
+}
+
+function buildFlight(a) {
+  const cs = (a.flight || "").trim();
+  const t = (a.t || "").toUpperCase();
+  const fam = WB[t];
+  if (!fam) return null;
+  const dist = distNm(a.lat, a.lon, LAX.lat, LAX.lon);
+  const route = cs ? routes.get(cs) : null;
+
+  // inbound determination: route DB says LAX → true; says elsewhere → false;
+  // no route data → null (shown as unconfirmed) only if it's plausibly arriving
+  let inbound = null;
+  if (route && !route.unknown && route.dest) {
+    inbound = route.dest === "LAX";
+  } else {
+    const toLax = a.track != null ? angleDiff(a.track, bearingDeg(a.lat, a.lon, LAX.lat, LAX.lon)) : 999;
+    const closing = toLax < 32 && a.gs > 60;
+    const overflight = typeof a.alt_baro === "number" && a.alt_baro > 32000 && dist < 100 &&
+                       !(typeof a.baro_rate === "number" && a.baro_rate < -500);
+    if (!closing || overflight) inbound = false;
+  }
+
+  const { rwy, onFinal } = predictRunway(a, dist);
+  const gs = a.gs > 60 ? a.gs : null;
+  const etaMin = gs ? (dist / gs) * 60 : null;
+  const airline = AIRLINES[cs.slice(0, 3)] || "";
+
+  return {
+    hex: a.hex, cs: cs || a.r || a.hex, reg: a.r || "", type: t,
+    family: fam[0], typeName: fam[1],
+    lat: a.lat, lon: a.lon, track: a.track,
+    alt: a.alt_baro, gs, dist, etaMin,
+    eta: etaMin != null ? new Date(Date.now() + etaMin * 60000) : null,
+    rwy, phase: phaseOf(a, dist, onFinal),
+    airline, orig: route && route.orig ? route.orig : null,
+    inbound
+  };
+}
+
+/* ============================== MAIN POLL ============================== */
+async function poll() {
+  if (state.paused) return;
+  const statusEl = document.getElementById("status");
+  try {
+    const acs = await fetchAircraft();
+    detectFlow(acs);
+
+    const wbAir = acs.filter(a => a.lat != null && WB[(a.t || "").toUpperCase()] && a.alt_baro !== "ground");
+
+    // route lookups for new callsigns
+    const need = wbAir.map(a => ({ cs: (a.flight || "").trim(), lat: a.lat, lon: a.lon }))
+                      .filter(x => x.cs && !routes.has(x.cs));
+    if (need.length) await fetchRoutes(need.slice(0, 80));
+
+    const built = wbAir.map(buildFlight).filter(Boolean);
+    const inbound = built.filter(f => f.inbound !== false);
+    const ghosts  = built.filter(f => f.inbound === false);
+
+    // landed detection: previously-inbound aircraft now on ground / gone near the field
+    const seen = new Set(built.map(f => f.hex));
+    const groundHexes = new Set(acs.filter(a => a.alt_baro === "ground").map(a => a.hex));
+    for (const f of state.flights) {
+      if (landed.has(f.hex)) continue;
+      const gone = !seen.has(f.hex);
+      if ((groundHexes.has(f.hex) || gone) && f.dist < 10 && (typeof f.alt !== "number" || f.alt < 4000)) {
+        landed.set(f.hex, { flight: { ...f, phase: "LANDED" }, at: Date.now() });
+      }
+    }
+    for (const [hex, l] of landed) {
+      if (Date.now() - l.at > 6 * 60000) landed.delete(hex);
+      if (seen.has(hex)) landed.delete(hex); // went around / still airborne
+    }
+
+    state.flights = inbound;
+    state.ghosts = ghosts;
+    state.lastOk = Date.now();
+    statusEl.textContent = `live · ${new Date().toLocaleTimeString("en-US", { timeZone: TZ, hour12: false })}`;
+    statusEl.classList.remove("err");
+  } catch (e) {
+    statusEl.textContent = "feed error — retrying";
+    statusEl.classList.add("err");
+  }
+  render();
+}
+
+/* ============================== RENDER: TABLE ============================== */
+const fmtTime = d => d ? d.toLocaleTimeString("en-US", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+function visibleFlights() {
+  const rows = [...landed.values()].map(l => l.flight).concat(
+    [...state.flights].sort((a, b) => (a.etaMin ?? 1e9) - (b.etaMin ?? 1e9))
+  );
+  return rows.filter(f => state.filters.has(f.family));
+}
+
+function renderTable() {
+  const body = document.getElementById("liveBody");
+  const rows = visibleFlights();
+  document.getElementById("acCount").textContent = `${state.flights.length} inbound`;
+  document.getElementById("liveSub").textContent = state.filters.size < FAMILIES.length ? " (filtered)" : "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="9"><div class="empty">No widebodies inbound within 250 NM right now.</div></td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(f => {
+    const c = FAM_COLOR[f.family];
+    const alt = f.phase === "LANDED" ? "—" : (typeof f.alt === "number" ? Math.round(f.alt / 100) * 100 : "—");
+    const origTxt = f.orig ? `${esc(f.orig.iata)}<span class="sub">${esc(f.orig.city || "")}</span>` :
+                    (f.inbound === null ? `<span class="likely">LAX?</span>` : "—");
+    const etaTxt = f.phase === "LANDED" ? "landed" :
+      f.eta ? `${fmtTime(f.eta)} <span class="eta-min">${Math.round(f.etaMin)}m</span>` : "—";
+    return `<tr data-hex="${esc(f.hex)}" class="${f.hex === state.sel ? "sel" : ""}${f.phase === "LANDED" ? " dim" : ""}">
+      <td><span class="flight">${esc(f.cs)}</span><span class="sub">${esc(f.airline || f.reg)}</span></td>
+      <td><span class="fam"><span class="dot" style="background:${c}"></span>${esc(f.type)}</span><span class="sub">${esc(f.typeName)}</span></td>
+      <td>${origTxt}</td>
+      <td class="num">${f.phase === "LANDED" ? "—" : Math.round(f.dist)}</td>
+      <td class="num">${alt}</td>
+      <td class="num">${f.gs ? Math.round(f.gs) : "—"}</td>
+      <td class="num">${etaTxt}</td>
+      <td><span class="rwy">${f.rwy}</span></td>
+      <td><span class="phase ${f.phase}">${f.phase}</span></td>
+    </tr>`;
+  }).join("");
+  body.querySelectorAll("tr[data-hex]").forEach(tr => {
+    tr.addEventListener("click", () => { state.sel = state.sel === tr.dataset.hex ? null : tr.dataset.hex; render(); });
+  });
+}
+
+/* ============================== RENDER: RADAR ============================== */
+const canvas = document.getElementById("radar");
+const ctx = canvas.getContext("2d");
+let hoverHex = null;
+
+function project(lat, lon, cx, cy, pxPerNm) {
+  const p = localNm(lat, lon, LAX);
+  return { x: cx + p.e * pxPerNm, y: cy - p.n * pxPerNm };
+}
+
+function drawPoly(pts, cx, cy, pxPerNm, close) {
+  ctx.beginPath();
+  pts.forEach(([la, lo], i) => {
+    const q = project(la, lo, cx, cy, pxPerNm);
+    i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y);
+  });
+  if (close) ctx.closePath();
+  ctx.stroke();
+}
+
+function drawRadar() {
+  const wrap = document.getElementById("radarWrap");
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if (!w || !h) return;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr; canvas.height = h * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#101014";
+  ctx.fillRect(0, 0, w, h);
+
+  const cx = w / 2, cy = h / 2;
+  const R = Math.min(w, h) / 2 - 14;
+  const pxPerNm = R / state.range;
+
+  // range rings
+  ctx.strokeStyle = "#2c2c2a"; ctx.lineWidth = 1;
+  ctx.fillStyle = "#898781"; ctx.font = "10px " + getComputedStyle(document.body).getPropertyValue("--mono");
+  const step = state.range / 5;
+  for (let i = 1; i <= 5; i++) {
+    ctx.beginPath(); ctx.arc(cx, cy, pxPerNm * step * i, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillText(Math.round(step * i) + "", cx + 3, cy - pxPerNm * step * i + 11);
+  }
+
+  // coastline + islands
+  ctx.strokeStyle = "#43434c"; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+  drawPoly(COAST, cx, cy, pxPerNm, false);
+  ISLANDS.forEach(p => drawPoly(p, cx, cy, pxPerNm, false));
+  ctx.setLineDash([]);
+
+  // nearby airports
+  ctx.fillStyle = "#6a6a72";
+  for (const [code, [la, lo]] of Object.entries(NEARBY)) {
+    const q = project(la, lo, cx, cy, pxPerNm);
+    if (Math.hypot(q.x - cx, q.y - cy) > R) continue;
+    ctx.fillRect(q.x - 2, q.y - 2, 4, 4);
+    ctx.fillText(code, q.x + 5, q.y + 3);
+  }
+
+  // final approach corridor (arrival side)
+  const hdgIn = state.flow === "W" ? RUNWAY_TRUE : (RUNWAY_TRUE + 180) % 360;
+  const backRad = rad((hdgIn + 180) % 360);
+  const fx = cx + Math.sin(backRad) * pxPerNm * Math.min(28, state.range * 0.9);
+  const fy = cy - Math.cos(backRad) * pxPerNm * Math.min(28, state.range * 0.9);
+  ctx.strokeStyle = "#4a4a38"; ctx.lineWidth = 2; ctx.setLineDash([7, 5]);
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(fx, fy); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // LAX
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+  ctx.fillStyle = "#c3c2b7"; ctx.fillText("LAX", cx + 8, cy + 12);
+
+  // aircraft
+  const labelSpots = [];
+  const drawAc = (f, ghost) => {
+    const q = project(f.lat, f.lon, cx, cy, pxPerNm);
+    if (Math.hypot(q.x - cx, q.y - cy) > R + 6) return null;
+    const col = FAM_COLOR[f.family];
+    ctx.save();
+    ctx.translate(q.x, q.y);
+    ctx.rotate(rad(f.track || 0));
+    ctx.globalAlpha = ghost ? 0.32 : 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -6.5); ctx.lineTo(4.5, 5.5); ctx.lineTo(0, 2.8); ctx.lineTo(-4.5, 5.5);
+    ctx.closePath();
+    ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#101014"; ctx.stroke();  // 2px surface ring
+    if (f.hex === state.sel || f.hex === hoverHex) {
+      ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+    ctx.restore();
+    if (!ghost) {
+      ctx.globalAlpha = 1;
+      // skip the callsign label if it would sit on one already drawn
+      const clash = labelSpots.some(s => Math.abs(s.x - q.x) < 52 && Math.abs(s.y - q.y) < 13);
+      if (!clash || f.hex === state.sel || f.hex === hoverHex) {
+        ctx.fillStyle = "#c3c2b7";
+        ctx.fillText(f.cs, q.x + 8, q.y - 6);
+        labelSpots.push({ x: q.x, y: q.y });
+      }
+    }
+    ctx.globalAlpha = 1;
+    return q;
+  };
+
+  const shown = visibleFlights().filter(f => f.phase !== "LANDED");
+  state._hitList = [];
+  state.ghosts.filter(f => state.filters.has(f.family)).forEach(f => {
+    const q = drawAc(f, true);
+    if (q) state._hitList.push({ q, f });
+  });
+  shown.forEach(f => {
+    const q = drawAc(f, false);
+    if (q) state._hitList.push({ q, f });
+  });
+}
+
+// hover tooltip
+const tip = document.getElementById("tip");
+canvas.addEventListener("mousemove", ev => {
+  const r = canvas.getBoundingClientRect();
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  let best = null, bd = 14;
+  for (const it of (state._hitList || [])) {
+    const d = Math.hypot(it.q.x - mx, it.q.y - my);
+    if (d < bd) { bd = d; best = it; }
+  }
+  hoverHex = best ? best.f.hex : null;
+  if (best) {
+    const f = best.f;
+    tip.style.display = "block";
+    tip.style.left = Math.min(mx + 14, r.width - 250) + "px";
+    tip.style.top = (my + 14) + "px";
+    tip.innerHTML = `<b>${esc(f.cs)}</b> ${f.airline ? "· " + esc(f.airline) : ""}<br>
+      ${esc(f.typeName)} (${esc(f.type)})<br>
+      ${f.orig ? "from " + esc(f.orig.iata) + " " + esc(f.orig.city || "") + "<br>" : ""}
+      ${Math.round(f.dist)} NM · ${typeof f.alt === "number" ? f.alt.toLocaleString() + " ft" : "—"} · ${f.gs ? Math.round(f.gs) + " kt" : ""}<br>
+      ETA ${fmtTime(f.eta)} · rwy ${f.rwy}${f.inbound === null ? " · dest unconfirmed" : ""}`;
+  } else {
+    tip.style.display = "none";
+  }
+  drawRadar();
+});
+canvas.addEventListener("mouseleave", () => { hoverHex = null; tip.style.display = "none"; drawRadar(); });
+canvas.addEventListener("click", () => {
+  state.sel = hoverHex && state.sel !== hoverHex ? hoverHex : null;
+  render();
+});
+
+/* ============================== SCHEDULE BOARD ============================== */
+const schedContent = document.getElementById("schedContent");
+let schedCache = null, schedAt = 0;
+
+function classifySched(f) {
+  const raw = ((f.aircraft && (f.aircraft.icao || f.aircraft.iata)) || "").toUpperCase().trim();
+  const icao = WB[raw] ? raw : IATA_TYPE[raw];
+  if (icao && WB[icao]) return { family: WB[icao][0], name: WB[icao][1], confirmed: true };
+  // no equipment info → heuristics
+  const al = f.airline && f.airline.iata;
+  const org = f.departure && f.departure.iata;
+  const ap = org && AIRPORTS[org.toUpperCase()];
+  const far = ap ? distNm(ap[0], ap[1], LAX.lat, LAX.lon) > 2600 : false;
+  if ((al && WB_AIRLINES.has(al.toUpperCase())) || far) return { family: null, name: "widebody (unconfirmed)", confirmed: false };
+  return null;
+}
+
+function schedRunway(f) {
+  const org = f.departure && f.departure.iata;
+  const ap = org && AIRPORTS[org.toUpperCase()];
+  if (!ap) return "—";
+  const b = bearingDeg(LAX.lat, LAX.lon, ap[0], ap[1]); // direction it arrives from ≈ toward origin
+  const north = (b >= 245 || b < 60);
+  return state.flow === "W" ? (north ? "24R" : "25L") : (north ? "06L/R" : "07L/R");
+}
+
+const laDay = d => d.toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" });
+
+function renderSchedule() {
+  if (!schedCache) return;
+  const showLikely = document.getElementById("likelyToggle").checked;
+  const now = Date.now();
+  const lo = now - 45 * 60000;          // keep just-landed flights briefly
+  const hi = now + 24 * 3600 * 1000;    // rolling 24-hour window
+  const seen = new Set();
+  const rows = [];
+  for (const f of schedCache) {
+    if (f.flight && f.flight.codeshared) continue; // dedupe codeshares
+    const sched = f.arrival && (f.arrival.scheduled || f.arrival.estimated);
+    const t = sched ? new Date(sched) : null;
+    if (!t || t.getTime() < lo || t.getTime() > hi) continue;
+    const key = `${(f.flight && f.flight.iata) || (f.airline && f.airline.iata) || ""}|${sched}`;
+    if (seen.has(key)) continue; // today+tomorrow queries can overlap
+    seen.add(key);
+    const cls = classifySched(f);
+    if (!cls || (!cls.confirmed && !showLikely)) continue;
+    rows.push({ f, cls, t });
+  }
+  rows.sort((a, b) => a.t.getTime() - b.t.getTime());
+  if (!rows.length) {
+    schedContent.innerHTML = `<div class="empty">No widebody arrivals in the next 24 hours (feed may be limited).</div>`;
+    return;
+  }
+  let lastDay = "";
+  schedContent.innerHTML = `<table><thead><tr>
+      <th>Sched</th><th>Est/Actual</th><th>Flight</th><th>Airline</th><th>From</th>
+      <th>Aircraft</th><th>Rwy*</th><th>Status</th>
+    </tr></thead><tbody>` +
+    rows.map(({ f, cls, t }) => {
+      const est = f.arrival && (f.arrival.actual || f.arrival.estimated);
+      const past = t.getTime() < now - 5 * 60000;
+      let divider = "";
+      const day = laDay(t);
+      if (day !== lastDay) {
+        divider = `<tr class="day"><td colspan="8">${esc(day)}</td></tr>`;
+        lastDay = day;
+      }
+      const org = f.departure || {};
+      const ap = org.iata && AIRPORTS[org.iata.toUpperCase()];
+      const famDot = cls.family ? `<span class="dot" style="background:${FAM_COLOR[cls.family]}"></span>` :
+                                  `<span class="dot" style="background:var(--c-other)"></span>`;
+      const acTxt = cls.confirmed ? `<span class="fam">${famDot}${esc((f.aircraft.icao || f.aircraft.iata || "").toUpperCase())}</span><span class="sub">${esc(cls.name)}</span>`
+                                  : `<span class="likely">likely WB</span><span class="sub">type not in feed</span>`;
+      const st = (f.flight_status || "scheduled").toLowerCase();
+      return divider + `<tr class="${past ? "dim" : ""}">
+        <td class="num">${t ? fmtTime(t) : "—"}</td>
+        <td class="num">${est ? fmtTime(new Date(est)) : "—"}</td>
+        <td><span class="flight">${esc((f.flight && f.flight.iata) || "")}</span></td>
+        <td style="font-family:var(--sans)">${esc((f.airline && f.airline.name) || "")}</td>
+        <td>${esc(org.iata || "—")}<span class="sub">${esc(ap ? ap[2] : (org.airport || ""))}</span></td>
+        <td>${acTxt}</td>
+        <td><span class="rwy">${schedRunway(f)}</span></td>
+        <td><span class="st ${esc(st)}">${esc(st)}</span></td>
+      </tr>`;
+    }).join("") + "</tbody></table>";
+}
+
+const SCHED_TTL = 60 * 60000;  // aviationstack free tier = 100 req/month, so cache for an hour
+const SCHED_PAGES = 3;         // up to 3×100 flights per day queried
+const laDateStr = offsetDays =>
+  new Date(Date.now() + offsetDays * 86400000).toLocaleDateString("en-CA", { timeZone: TZ });
+
+function saveSched(data) {
+  schedCache = data; schedAt = Date.now();
+  try { localStorage.setItem("laxwb_sched", JSON.stringify({ at: schedAt, data })); } catch (e) { /* quota */ }
+  renderSchedule();
+}
+
+async function loadSchedule(force) {
+  if (schedCache && !force && Date.now() - schedAt < SCHED_TTL) { renderSchedule(); return; }
+  if (!force) {
+    try {
+      const c = JSON.parse(localStorage.getItem("laxwb_sched") || "null");
+      if (c && Array.isArray(c.data) && Date.now() - c.at < SCHED_TTL) {
+        schedCache = c.data; schedAt = c.at; renderSchedule(); return;
+      }
+    } catch (e) { /* corrupt cache — refetch */ }
+  }
+  schedContent.innerHTML = `<div class="empty">Loading next 24 h of arrivals…</div>`;
+  // 1) same-origin proxy (Next.js dev server or the Vercel deployment, with AVIATIONSTACK_KEY set)
+  try {
+    const r = await fetch("/api/lax-arrivals", { signal: AbortSignal.timeout(25000) });
+    if (r.ok) {
+      const j = await r.json();
+      if (Array.isArray(j.data)) { saveSched(j.data); return; }
+    }
+  } catch (e) { /* not running behind the proxy — fall through */ }
+  // 2) direct with a user-supplied aviationstack key: today + tomorrow, paginated
+  const key = localStorage.getItem("laxwb_avkey") || "";
+  if (!key) { schedSetup(); return; }
+  const dates = [laDateStr(0), laDateStr(1)];
+  let apiErr = null;
+  for (const proto of ["https", "http"]) {
+    if (proto === "http" && location.protocol === "https:") break; // mixed content
+    try {
+      const all = [];
+      for (const fd of dates) {
+        for (let off = 0; off < SCHED_PAGES * 100; off += 100) {
+          const r = await fetch(`${proto}://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}` +
+            `&arr_iata=LAX&limit=100&offset=${off}&flight_date=${fd}`,
+            { signal: AbortSignal.timeout(20000) });
+          const j = await r.json();
+          if (j.error) { apiErr = j.error; throw new Error("api"); }
+          all.push(...(Array.isArray(j.data) ? j.data : []));
+          const total = (j.pagination && j.pagination.total) || 0;
+          if (off + 100 >= total) break;
+        }
+      }
+      saveSched(all);
+      return;
+    } catch (e) {
+      if (apiErr) {
+        schedSetup(`aviationstack error: <code>${esc(apiErr.code || apiErr.message || "unknown")}</code>`);
+        return;
+      }
+      /* network failure — try next protocol */
+    }
+  }
+  schedSetup("Could not reach aviationstack with the saved key.");
+}
+
+function schedSetup(err) {
+  schedContent.innerHTML = `<div class="setup">
+    ${err ? `<p style="color:var(--critical);margin-bottom:8px">${err}</p>` : ""}
+    <p><b style="color:var(--ink)">Schedule feed needs a (free) API key.</b> The live tab works with no key —
+    it already shows every widebody inbound within 250&nbsp;NM (~45 min lookahead). For the 24-hour scheduled
+    board, either:</p>
+    <p style="margin-top:8px">① Serve this app behind the included <code>/api/lax-arrivals</code> proxy
+    (Vercel deployment or Next.js dev server) with <code>AVIATIONSTACK_KEY</code> set in the environment —
+    it caches for an hour to protect the free 100-req/month quota, or</p>
+    <p style="margin-top:8px">② Paste an <a href="https://aviationstack.com/" target="_blank" rel="noopener" style="color:var(--c-777)">aviationstack</a>
+    key here (stored only in this browser):</p>
+    <p style="margin-top:8px"><input id="avKey" type="password" placeholder="aviationstack access key">
+    <button id="avSave">save &amp; load</button></p>
+  </div>`;
+  const btn = document.getElementById("avSave");
+  if (btn) btn.addEventListener("click", () => {
+    const v = document.getElementById("avKey").value.trim();
+    if (v) { localStorage.setItem("laxwb_avkey", v); loadSchedule(true); }
+  });
+}
+
+/* ============================== UI WIRING ============================== */
+function render() { renderTable(); drawRadar(); }
+
+function buildChips() {
+  const el = document.getElementById("filters");
+  FAMILIES.forEach(fam => {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (state.filters.has(fam) ? "" : " off");
+    chip.style.setProperty("--dot", FAM_COLOR[fam]);
+    chip.innerHTML = `<span class="dot"></span>${fam}<span class="n" data-n="${fam}"></span>`;
+    chip.addEventListener("click", () => {
+      state.filters.has(fam) ? state.filters.delete(fam) : state.filters.add(fam);
+      chip.classList.toggle("off", !state.filters.has(fam));
+      localStorage.setItem("laxwb_filters", JSON.stringify([...state.filters]));
+      render(); renderSchedule();
+    });
+    el.appendChild(chip);
+  });
+  const allBtn = document.createElement("button");
+  allBtn.textContent = "all";
+  allBtn.addEventListener("click", () => {
+    FAMILIES.forEach(f => state.filters.add(f));
+    el.querySelectorAll(".chip").forEach(c => c.classList.remove("off"));
+    localStorage.setItem("laxwb_filters", JSON.stringify([...state.filters]));
+    render(); renderSchedule();
+  });
+  el.appendChild(allBtn);
+  // flow override
+  const flowBtn = document.createElement("button");
+  flowBtn.id = "flowOverride";
+  flowBtn.textContent = "flow: auto";
+  flowBtn.title = "cycle flow detection: auto → force west → force east";
+  flowBtn.addEventListener("click", () => {
+    if (state.flowAuto) { state.flowAuto = false; state.flow = "W"; flowBtn.textContent = "flow: WEST (forced)"; }
+    else if (state.flow === "W") { state.flow = "E"; flowBtn.textContent = "flow: EAST (forced)"; }
+    else { state.flowAuto = true; flowBtn.textContent = "flow: auto"; }
+    updateFlowBadge(); render();
+  });
+  el.appendChild(flowBtn);
+}
+
+function updateFlowBadge() {
+  const b = document.getElementById("flowBadge");
+  b.textContent = state.flow === "W" ? "WEST FLOW · landing 24R/25L" : "EAST FLOW · landing 06/07";
+  b.classList.toggle("east", state.flow === "E");
+}
+
+document.getElementById("pauseBtn").addEventListener("click", function () {
+  state.paused = !state.paused;
+  this.textContent = state.paused ? "▶ resume" : "⏸ pause";
+  this.classList.toggle("on", state.paused);
+  if (!state.paused) poll();
+});
+document.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", function () {
+  state.range = +this.dataset.range;
+  document.querySelectorAll("[data-range]").forEach(x => x.classList.toggle("on", x === this));
+  drawRadar();
+}));
+document.getElementById("tabLive").addEventListener("click", () => switchTab("live"));
+document.getElementById("tabSched").addEventListener("click", () => switchTab("sched"));
+function switchTab(t) {
+  document.getElementById("tabLive").classList.toggle("on", t === "live");
+  document.getElementById("tabSched").classList.toggle("on", t === "sched");
+  document.getElementById("liveView").style.display = t === "live" ? "grid" : "none";
+  document.getElementById("schedView").style.display = t === "sched" ? "block" : "none";
+  if (t === "sched") loadSchedule(false);
+  else drawRadar();
+}
+document.getElementById("schedRefresh").addEventListener("click", () => loadSchedule(true));
+document.getElementById("likelyToggle").addEventListener("change", renderSchedule);
+
+// clock + flow badge tick
+setInterval(() => {
+  document.getElementById("clock").textContent =
+    new Date().toLocaleTimeString("en-US", { timeZone: TZ, hour12: false }) + " PT";
+  updateFlowBadge();
+}, 1000);
+
+new ResizeObserver(() => drawRadar()).observe(document.getElementById("radarWrap"));
+
+/* ============================== BOOT ============================== */
+buildChips();
+updateFlowBadge();
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
