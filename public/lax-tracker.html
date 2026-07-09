@@ -167,6 +167,11 @@
   .st.delayed   { color: var(--serious); border-color: var(--serious); }
   .st.cancelled { color: var(--critical); border-color: var(--critical); }
   .likely { color: var(--warning); font-size: 11px; }
+  tr.day td {
+    font-family: var(--sans); font-size: 11px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .1em; background: var(--surface-2);
+    padding: 5px 10px;
+  }
 
   footer { padding: 10px 16px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--muted); line-height: 1.6; }
   footer b { color: var(--ink-2); }
@@ -226,12 +231,12 @@
   <div id="schedView">
     <div class="panel">
       <div class="panel-head">
-        Scheduled arrivals · LAX
+        Scheduled arrivals · next 24 h
         <div class="spacer"></div>
         <label style="text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" id="likelyToggle" checked> include likely widebodies (type unconfirmed)
         </label>
-        <button id="schedRefresh">↻ refresh</button>
+        <button id="schedRefresh" title="bypasses the 1-hour cache — spends ~6 API requests">↻ refresh</button>
       </div>
       <div id="schedContent" class="tbl-scroll"></div>
     </div>
@@ -818,30 +823,47 @@ function schedRunway(f) {
   return state.flow === "W" ? (north ? "24R" : "25L") : (north ? "06L/R" : "07L/R");
 }
 
+const laDay = d => d.toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" });
+
 function renderSchedule() {
   if (!schedCache) return;
   const showLikely = document.getElementById("likelyToggle").checked;
+  const now = Date.now();
+  const lo = now - 45 * 60000;          // keep just-landed flights briefly
+  const hi = now + 24 * 3600 * 1000;    // rolling 24-hour window
+  const seen = new Set();
   const rows = [];
   for (const f of schedCache) {
     if (f.flight && f.flight.codeshared) continue; // dedupe codeshares
+    const sched = f.arrival && (f.arrival.scheduled || f.arrival.estimated);
+    const t = sched ? new Date(sched) : null;
+    if (!t || t.getTime() < lo || t.getTime() > hi) continue;
+    const key = `${(f.flight && f.flight.iata) || (f.airline && f.airline.iata) || ""}|${sched}`;
+    if (seen.has(key)) continue; // today+tomorrow queries can overlap
+    seen.add(key);
     const cls = classifySched(f);
     if (!cls || (!cls.confirmed && !showLikely)) continue;
-    const sched = f.arrival && (f.arrival.scheduled || f.arrival.estimated);
-    rows.push({ f, cls, t: sched ? new Date(sched) : null });
+    rows.push({ f, cls, t });
   }
-  rows.sort((a, b) => (a.t ? a.t.getTime() : 0) - (b.t ? b.t.getTime() : 0));
+  rows.sort((a, b) => a.t.getTime() - b.t.getTime());
   if (!rows.length) {
-    schedContent.innerHTML = `<div class="empty">No widebody arrivals found in the feed.</div>`;
+    schedContent.innerHTML = `<div class="empty">No widebody arrivals in the next 24 hours (feed may be limited).</div>`;
     return;
   }
-  const now = Date.now();
+  let lastDay = "";
   schedContent.innerHTML = `<table><thead><tr>
       <th>Sched</th><th>Est/Actual</th><th>Flight</th><th>Airline</th><th>From</th>
       <th>Aircraft</th><th>Rwy*</th><th>Status</th>
     </tr></thead><tbody>` +
     rows.map(({ f, cls, t }) => {
       const est = f.arrival && (f.arrival.actual || f.arrival.estimated);
-      const past = t && t.getTime() < now - 30 * 60000 && f.flight_status === "landed";
+      const past = t.getTime() < now - 5 * 60000;
+      let divider = "";
+      const day = laDay(t);
+      if (day !== lastDay) {
+        divider = `<tr class="day"><td colspan="8">${esc(day)}</td></tr>`;
+        lastDay = day;
+      }
       const org = f.departure || {};
       const ap = org.iata && AIRPORTS[org.iata.toUpperCase()];
       const famDot = cls.family ? `<span class="dot" style="background:${FAM_COLOR[cls.family]}"></span>` :
@@ -849,7 +871,7 @@ function renderSchedule() {
       const acTxt = cls.confirmed ? `<span class="fam">${famDot}${esc((f.aircraft.icao || f.aircraft.iata || "").toUpperCase())}</span><span class="sub">${esc(cls.name)}</span>`
                                   : `<span class="likely">likely WB</span><span class="sub">type not in feed</span>`;
       const st = (f.flight_status || "scheduled").toLowerCase();
-      return `<tr class="${past ? "dim" : ""}">
+      return divider + `<tr class="${past ? "dim" : ""}">
         <td class="num">${t ? fmtTime(t) : "—"}</td>
         <td class="num">${est ? fmtTime(new Date(est)) : "—"}</td>
         <td><span class="flight">${esc((f.flight && f.flight.iata) || "")}</span></td>
@@ -862,45 +884,79 @@ function renderSchedule() {
     }).join("") + "</tbody></table>";
 }
 
+const SCHED_TTL = 60 * 60000;  // aviationstack free tier = 100 req/month, so cache for an hour
+const SCHED_PAGES = 3;         // up to 3×100 flights per day queried
+const laDateStr = offsetDays =>
+  new Date(Date.now() + offsetDays * 86400000).toLocaleDateString("en-CA", { timeZone: TZ });
+
+function saveSched(data) {
+  schedCache = data; schedAt = Date.now();
+  try { localStorage.setItem("laxwb_sched", JSON.stringify({ at: schedAt, data })); } catch (e) { /* quota */ }
+  renderSchedule();
+}
+
 async function loadSchedule(force) {
-  if (schedCache && !force && Date.now() - schedAt < 10 * 60000) { renderSchedule(); return; }
-  schedContent.innerHTML = `<div class="empty">Loading schedule…</div>`;
-  // 1) same-origin proxy (available when served by the Next.js app with AVIATIONSTACK_KEY set)
+  if (schedCache && !force && Date.now() - schedAt < SCHED_TTL) { renderSchedule(); return; }
+  if (!force) {
+    try {
+      const c = JSON.parse(localStorage.getItem("laxwb_sched") || "null");
+      if (c && Array.isArray(c.data) && Date.now() - c.at < SCHED_TTL) {
+        schedCache = c.data; schedAt = c.at; renderSchedule(); return;
+      }
+    } catch (e) { /* corrupt cache — refetch */ }
+  }
+  schedContent.innerHTML = `<div class="empty">Loading next 24 h of arrivals…</div>`;
+  // 1) same-origin proxy (Next.js dev server or the Vercel deployment, with AVIATIONSTACK_KEY set)
   try {
-    const r = await fetch("/api/lax-arrivals", { signal: AbortSignal.timeout(15000) });
+    const r = await fetch("/api/lax-arrivals", { signal: AbortSignal.timeout(25000) });
     if (r.ok) {
       const j = await r.json();
-      if (Array.isArray(j.data)) { schedCache = j.data; schedAt = Date.now(); renderSchedule(); return; }
+      if (Array.isArray(j.data)) { saveSched(j.data); return; }
     }
-  } catch (e) { /* not running under the app — fall through */ }
-  // 2) direct with a user-supplied aviationstack key
+  } catch (e) { /* not running behind the proxy — fall through */ }
+  // 2) direct with a user-supplied aviationstack key: today + tomorrow, paginated
   const key = localStorage.getItem("laxwb_avkey") || "";
-  if (key) {
-    for (const proto of ["https", "http"]) {
-      if (proto === "http" && location.protocol === "https:") break; // mixed content
-      try {
-        const r = await fetch(`${proto}://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}&arr_iata=LAX&limit=100`,
-          { signal: AbortSignal.timeout(15000) });
-        const j = await r.json();
-        if (Array.isArray(j.data)) { schedCache = j.data; schedAt = Date.now(); renderSchedule(); return; }
-        if (j.error) { schedSetup(`aviationstack error: <code>${esc(j.error.code || j.error.message || "unknown")}</code>`); return; }
-      } catch (e) { /* try next proto */ }
+  if (!key) { schedSetup(); return; }
+  const dates = [laDateStr(0), laDateStr(1)];
+  let apiErr = null;
+  for (const proto of ["https", "http"]) {
+    if (proto === "http" && location.protocol === "https:") break; // mixed content
+    try {
+      const all = [];
+      for (const fd of dates) {
+        for (let off = 0; off < SCHED_PAGES * 100; off += 100) {
+          const r = await fetch(`${proto}://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}` +
+            `&arr_iata=LAX&limit=100&offset=${off}&flight_date=${fd}`,
+            { signal: AbortSignal.timeout(20000) });
+          const j = await r.json();
+          if (j.error) { apiErr = j.error; throw new Error("api"); }
+          all.push(...(Array.isArray(j.data) ? j.data : []));
+          const total = (j.pagination && j.pagination.total) || 0;
+          if (off + 100 >= total) break;
+        }
+      }
+      saveSched(all);
+      return;
+    } catch (e) {
+      if (apiErr) {
+        schedSetup(`aviationstack error: <code>${esc(apiErr.code || apiErr.message || "unknown")}</code>`);
+        return;
+      }
+      /* network failure — try next protocol */
     }
-    schedSetup("Could not reach aviationstack with the saved key.");
-    return;
   }
-  schedSetup();
+  schedSetup("Could not reach aviationstack with the saved key.");
 }
 
 function schedSetup(err) {
   schedContent.innerHTML = `<div class="setup">
     ${err ? `<p style="color:var(--critical);margin-bottom:8px">${err}</p>` : ""}
     <p><b style="color:var(--ink)">Schedule feed needs a (free) API key.</b> The live tab works with no key —
-    it already shows every widebody inbound within 250&nbsp;NM (~45 min lookahead). For the full-day scheduled
+    it already shows every widebody inbound within 250&nbsp;NM (~45 min lookahead). For the 24-hour scheduled
     board, either:</p>
-    <p style="margin-top:8px">① Run this app inside the Next.js project with <code>AVIATIONSTACK_KEY</code> set in
-    <code>.env.local</code> (the <code>/api/lax-arrivals</code> proxy is included and caches to protect the free
-    100-req/month quota), or</p>
+    <p style="margin-top:8px">① Serve this app behind the included <code>/api/lax-arrivals</code> proxy
+    (Vercel deployment or Next.js dev server) with <code>AVIATIONSTACK_KEY</code> set in the environment —
+    it caches for an hour to protect the free 100-req/month quota, or</p>
     <p style="margin-top:8px">② Paste an <a href="https://aviationstack.com/" target="_blank" rel="noopener" style="color:var(--c-777)">aviationstack</a>
     key here (stored only in this browser):</p>
     <p style="margin-top:8px"><input id="avKey" type="password" placeholder="aviationstack access key">
