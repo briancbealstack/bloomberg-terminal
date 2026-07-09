@@ -918,52 +918,83 @@ async function loadSchedule(force) {
       }
     } catch (e) { /* not running behind the proxy — fall through */ }
   }
-  // 2) direct with a user-supplied aviationstack key: today + tomorrow, paginated.
-  //    The free plan allows HTTP only, so unless this page is itself served over
-  //    HTTPS (where mixed-content blocks HTTP), try HTTP first — which is exactly
-  //    the local-file case. Fatal key/quota errors stop; an HTTPS-only restriction
-  //    just falls through to the next protocol.
+  // 2) direct with a user-supplied aviationstack key.
+  //    The FREE plan only includes the real-time /flights query (no `flight_date`)
+  //    and only over HTTP. So the baseline call is real-time (today's arrivals in
+  //    all states), which every plan allows. Explicit today/tomorrow queries are a
+  //    bonus for paid plans and are skipped for good once the plan rejects them
+  //    (`function_access_restricted` / historical restriction) so we don't waste
+  //    the tiny free quota re-failing every refresh.
   const key = localStorage.getItem("laxwb_avkey") || "";
   if (!key) { schedSetup(); return; }
-  const dates = [laDateStr(0), laDateStr(1)];
   const protos = location.protocol === "https:" ? ["https"] : ["http", "https"];
+  const datedBlocked = localStorage.getItem("laxwb_nodated") === "1";
   const FATAL = {
     invalid_access_key: "That access key isn't valid — check it and try again.",
     missing_access_key: "No access key was sent.",
     inactive_user: "This aviationstack account is inactive.",
     usage_limit_reached: "The free monthly quota (100 requests) is used up; it resets on your billing cycle.",
-    rate_limit_reached: "Too many requests just now — wait a moment and hit refresh.",
-    function_access_restricted: "Your aviationstack plan doesn't include this endpoint."
+    rate_limit_reached: "Too many requests just now — wait a moment and hit refresh."
   };
-  let lastErr = null;
-  for (const proto of protos) {
-    try {
-      const all = [];
-      for (const fd of dates) {
-        for (let off = 0; off < SCHED_PAGES * 100; off += 100) {
-          const r = await fetch(`${proto}://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}` +
-            `&arr_iata=LAX&limit=100&offset=${off}&flight_date=${fd}`,
-            { signal: AbortSignal.timeout(20000) });
-          const j = await r.json();
-          if (j.error) {
-            const code = j.error.code || j.error.type || "unknown";
-            if (FATAL[code]) { schedSetup(`aviationstack: ${esc(FATAL[code])}`); return; }
-            lastErr = code;              // e.g. https_access_restricted → try next protocol
-            throw new Error(code);
-          }
-          const data = Array.isArray(j.data) ? j.data : [];
-          all.push(...data);
-          const total = (j.pagination && j.pagination.total) || 0;
-          if (data.length < 100 || off + 100 >= total) break;
+  const SKIP_DATED = new Set(["function_access_restricted", "historical_data_restricted",
+    "usage_limit_reached", "rate_limit_reached"]);
+  let working = null;  // remember the protocol that connected
+
+  // Fetch one page. Resolves to an array, or throws an Error whose .code is the
+  // aviationstack error code (or "network"). API errors don't retry the other
+  // protocol (same result); only a transport failure does.
+  async function fetchPage(flightDate, offset) {
+    let netErr = null;
+    for (const proto of (working ? [working] : protos)) {
+      let url = `${proto}://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}` +
+        `&arr_iata=LAX&limit=100&offset=${offset}`;
+      if (flightDate) url += `&flight_date=${flightDate}`;
+      let j;
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+        j = await r.json();
+      } catch (e) { netErr = "network"; continue; }   // transport failure → try next protocol
+      if (j.error) {
+        const err = new Error(j.error.code || j.error.type || "unknown");
+        err.code = j.error.code || j.error.type || "unknown";
+        throw err;
+      }
+      working = proto;
+      return Array.isArray(j.data) ? j.data : [];
+    }
+    const e = new Error(netErr || "network"); e.code = netErr || "network"; throw e;
+  }
+
+  async function collect(flightDate) {
+    const out = [];
+    for (let off = 0; off < SCHED_PAGES * 100; off += 100) {
+      const data = await fetchPage(flightDate, off);
+      out.push(...data);
+      if (data.length < 100) break;
+    }
+    return out;
+  }
+
+  try {
+    const all = await collect(null);           // real-time baseline (free-compatible)
+    if (!datedBlocked) {                        // bonus: explicit today + tomorrow (paid plans)
+      for (const fd of [laDateStr(0), laDateStr(1)]) {
+        try { all.push(...await collect(fd)); }
+        catch (e) {
+          if (SKIP_DATED.has(e.code)) { localStorage.setItem("laxwb_nodated", "1"); break; }
+          /* other bonus errors: ignore, keep the baseline */
         }
       }
-      saveSched(all);
-      return;
-    } catch (e) { /* fall through to the next protocol */ }
+    }
+    saveSched(all);
+  } catch (e) {
+    if (FATAL[e.code]) schedSetup(`aviationstack: ${esc(FATAL[e.code])}`);
+    else if (e.code === "function_access_restricted")
+      schedSetup("aviationstack: your plan doesn't include the flights endpoint. The schedule board needs at least the free real-time flights access.");
+    else if (e.code === "network")
+      schedSetup("Couldn't reach aviationstack — check your connection, then hit refresh.");
+    else schedSetup(`aviationstack returned <code>${esc(e.code)}</code>.`);
   }
-  schedSetup(lastErr
-    ? `aviationstack returned <code>${esc(lastErr)}</code>. On the free plan the schedule board works from a local file or the server proxy (both use HTTP), but not from an HTTPS page.`
-    : "Couldn't reach aviationstack — check your connection, then hit refresh.");
 }
 
 function schedSetup(err) {
