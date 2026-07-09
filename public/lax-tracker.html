@@ -906,21 +906,37 @@ async function loadSchedule(force) {
     } catch (e) { /* corrupt cache — refetch */ }
   }
   schedContent.innerHTML = `<div class="empty">Loading next 24 h of arrivals…</div>`;
-  // 1) same-origin proxy (Next.js dev server or the Vercel deployment, with AVIATIONSTACK_KEY set)
-  try {
-    const r = await fetch("/api/lax-arrivals", { signal: AbortSignal.timeout(25000) });
-    if (r.ok) {
-      const j = await r.json();
-      if (Array.isArray(j.data)) { saveSched(j.data); return; }
-    }
-  } catch (e) { /* not running behind the proxy — fall through */ }
-  // 2) direct with a user-supplied aviationstack key: today + tomorrow, paginated
+  const isLocal = location.protocol === "file:";
+  // 1) same-origin proxy (Next.js dev server / Vercel deployment with AVIATIONSTACK_KEY).
+  //    Skipped for a local file, where a relative /api fetch can't resolve.
+  if (!isLocal) {
+    try {
+      const r = await fetch("/api/lax-arrivals", { signal: AbortSignal.timeout(25000) });
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j.data)) { saveSched(j.data); return; }
+      }
+    } catch (e) { /* not running behind the proxy — fall through */ }
+  }
+  // 2) direct with a user-supplied aviationstack key: today + tomorrow, paginated.
+  //    The free plan allows HTTP only, so unless this page is itself served over
+  //    HTTPS (where mixed-content blocks HTTP), try HTTP first — which is exactly
+  //    the local-file case. Fatal key/quota errors stop; an HTTPS-only restriction
+  //    just falls through to the next protocol.
   const key = localStorage.getItem("laxwb_avkey") || "";
   if (!key) { schedSetup(); return; }
   const dates = [laDateStr(0), laDateStr(1)];
-  let apiErr = null;
-  for (const proto of ["https", "http"]) {
-    if (proto === "http" && location.protocol === "https:") break; // mixed content
+  const protos = location.protocol === "https:" ? ["https"] : ["http", "https"];
+  const FATAL = {
+    invalid_access_key: "That access key isn't valid — check it and try again.",
+    missing_access_key: "No access key was sent.",
+    inactive_user: "This aviationstack account is inactive.",
+    usage_limit_reached: "The free monthly quota (100 requests) is used up; it resets on your billing cycle.",
+    rate_limit_reached: "Too many requests just now — wait a moment and hit refresh.",
+    function_access_restricted: "Your aviationstack plan doesn't include this endpoint."
+  };
+  let lastErr = null;
+  for (const proto of protos) {
     try {
       const all = [];
       for (const fd of dates) {
@@ -929,36 +945,45 @@ async function loadSchedule(force) {
             `&arr_iata=LAX&limit=100&offset=${off}&flight_date=${fd}`,
             { signal: AbortSignal.timeout(20000) });
           const j = await r.json();
-          if (j.error) { apiErr = j.error; throw new Error("api"); }
-          all.push(...(Array.isArray(j.data) ? j.data : []));
+          if (j.error) {
+            const code = j.error.code || j.error.type || "unknown";
+            if (FATAL[code]) { schedSetup(`aviationstack: ${esc(FATAL[code])}`); return; }
+            lastErr = code;              // e.g. https_access_restricted → try next protocol
+            throw new Error(code);
+          }
+          const data = Array.isArray(j.data) ? j.data : [];
+          all.push(...data);
           const total = (j.pagination && j.pagination.total) || 0;
-          if (off + 100 >= total) break;
+          if (data.length < 100 || off + 100 >= total) break;
         }
       }
       saveSched(all);
       return;
-    } catch (e) {
-      if (apiErr) {
-        schedSetup(`aviationstack error: <code>${esc(apiErr.code || apiErr.message || "unknown")}</code>`);
-        return;
-      }
-      /* network failure — try next protocol */
-    }
+    } catch (e) { /* fall through to the next protocol */ }
   }
-  schedSetup("Could not reach aviationstack with the saved key.");
+  schedSetup(lastErr
+    ? `aviationstack returned <code>${esc(lastErr)}</code>. On the free plan the schedule board works from a local file or the server proxy (both use HTTP), but not from an HTTPS page.`
+    : "Couldn't reach aviationstack — check your connection, then hit refresh.");
 }
 
 function schedSetup(err) {
+  const isLocal = location.protocol === "file:";
+  const proxyLine = isLocal
+    ? `<p style="margin-top:8px">Tip: opened as a local file, the free plan works directly (this page uses HTTP,
+       which the free tier requires). If you later host this on an <code>https://</code> page, paste-a-key stops
+       working on the free tier — use the included <code>/api/lax-arrivals</code> proxy (Vercel) instead.</p>`
+    : `<p style="margin-top:8px">① Serve this app behind the included <code>/api/lax-arrivals</code> proxy
+       (Vercel deployment or Next.js dev server) with <code>AVIATIONSTACK_KEY</code> set in the environment —
+       it caches for an hour to protect the free 100-req/month quota, or</p>`;
   schedContent.innerHTML = `<div class="setup">
     ${err ? `<p style="color:var(--critical);margin-bottom:8px">${err}</p>` : ""}
     <p><b style="color:var(--ink)">Schedule feed needs a (free) API key.</b> The live tab works with no key —
     it already shows every widebody inbound within 250&nbsp;NM (~45 min lookahead). For the 24-hour scheduled
-    board, either:</p>
-    <p style="margin-top:8px">① Serve this app behind the included <code>/api/lax-arrivals</code> proxy
-    (Vercel deployment or Next.js dev server) with <code>AVIATIONSTACK_KEY</code> set in the environment —
-    it caches for an hour to protect the free 100-req/month quota, or</p>
-    <p style="margin-top:8px">② Paste an <a href="https://aviationstack.com/" target="_blank" rel="noopener" style="color:var(--c-777)">aviationstack</a>
-    key here (stored only in this browser):</p>
+    board:</p>
+    ${proxyLine}
+    <p style="margin-top:8px">${isLocal ? "" : "② "}Get a free key at
+    <a href="https://aviationstack.com/" target="_blank" rel="noopener" style="color:var(--c-777)">aviationstack.com</a>
+    and paste it here (stored only in this browser):</p>
     <p style="margin-top:8px"><input id="avKey" type="password" placeholder="aviationstack access key">
     <button id="avSave">save &amp; load</button></p>
   </div>`;
