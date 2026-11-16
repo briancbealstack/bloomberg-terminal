@@ -6,7 +6,7 @@ const KEY = process.env.AVIATIONSTACK_KEY;
 // `flight_date`); dated today/tomorrow queries are a paid bonus, skipped once the
 // plan rejects them so we don't burn quota re-failing.
 let cache = { at: 0, data: null };
-const TTL_MS = 60 * 60 * 1000;
+const TTL_MS = 3 * 60 * 60 * 1000;
 const PAGES = 3;
 const SKIP_DATED = new Set(["function_access_restricted", "historical_data_restricted",
   "usage_limit_reached", "rate_limit_reached"]);
@@ -15,11 +15,10 @@ const laDate = offsetDays =>
   new Date(Date.now() + offsetDays * 86400000)
     .toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-async function collect(flightDate) {
+async function collect(extra, pages = PAGES) {
   const out = [];
-  for (let offset = 0; offset < PAGES * 100; offset += 100) {
-    const params = { access_key: KEY, arr_iata: "LAX", limit: "100", offset: String(offset) };
-    if (flightDate) params.flight_date = flightDate;
+  for (let offset = 0; offset < pages * 100; offset += 100) {
+    const params = { access_key: KEY, arr_iata: "LAX", limit: "100", offset: String(offset), ...extra };
     const r = await fetch(`${AVIATIONSTACK}?${new URLSearchParams(params)}`);
     if (!r.ok) { const e = new Error(`http_${r.status}`); e.code = `http_${r.status}`; throw e; }
     const j = await r.json();
@@ -40,13 +39,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const all = await collect(null);            // real-time baseline (free-compatible)
+    // baseline allowed on every plan: airborne now, then still to depart
+    const all = await collect({ flight_status: "active" }, 2);
+    try { all.push(...await collect({ flight_status: "scheduled" })); }
+    catch (e) { if (!all.length) throw e; }
     for (const flightDate of [laDate(0), laDate(1)]) {   // bonus: explicit today + tomorrow
-      try { all.push(...await collect(flightDate)); }
+      try { all.push(...await collect({ flight_date: flightDate })); }
       catch (e) { if (SKIP_DATED.has(e.code)) break; /* else ignore, keep baseline */ }
     }
     cache = { at: Date.now(), data: { data: all } };
-    res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=7200");
+    res.setHeader("Cache-Control", "s-maxage=10800, stale-while-revalidate=21600");
     res.status(200).json(cache.data);
   } catch (err) {
     if (cache.data) return res.status(200).json(cache.data); // stale beats nothing

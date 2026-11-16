@@ -167,6 +167,11 @@
   .st.delayed   { color: var(--serious); border-color: var(--serious); }
   .st.cancelled { color: var(--critical); border-color: var(--critical); }
   .likely { color: var(--warning); font-size: 11px; }
+  .rare { color: var(--warning); font-size: 12px; }
+  .late { color: var(--serious); font-size: 11px; }
+  .st.diverted, .st.incident { color: var(--serious); border-color: var(--serious); }
+  #schedMeta { text-transform: none; letter-spacing: 0; }
+  .empty code { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
   tr.day td {
     font-family: var(--sans); font-size: 11px; font-weight: 700; color: var(--muted);
     text-transform: uppercase; letter-spacing: .1em; background: var(--surface-2);
@@ -231,12 +236,12 @@
   <div id="schedView">
     <div class="panel">
       <div class="panel-head">
-        Scheduled arrivals · next 24 h
+        Scheduled arrivals · next 24 h <span id="schedMeta"></span>
         <div class="spacer"></div>
         <label style="text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:6px;cursor:pointer">
           <input type="checkbox" id="likelyToggle" checked> include likely widebodies (type unconfirmed)
         </label>
-        <button id="schedRefresh" title="bypasses the 1-hour cache — spends ~6 API requests">↻ refresh</button>
+        <button id="schedRefresh" title="bypasses the 3-hour cache — spends a few of your API requests">↻ refresh</button>
       </div>
       <div id="schedContent" class="tbl-scroll"></div>
     </div>
@@ -246,7 +251,7 @@
 <footer>
   <b>Data:</b> live positions via adsb.lol / airplanes.live (community ADS-B, no key needed); routes via adsb.lol route DB; schedules via aviationstack (optional key).
   &nbsp;·&nbsp; <b>*Runway is a prediction</b>, from detected flow + approach corridor (normal LAX west ops land 24R north / 25L south; inner runways 24L/25R are used at peaks; overnight over-ocean and Santa Ana east ops land on the 06/07s) — not an ATC assignment.
-  &nbsp;·&nbsp; ETA = distance ÷ ground speed. All times America/Los_Angeles.
+  &nbsp;·&nbsp; ETA is an estimate (routed via a 10 NM final, with approach slow-down). ★ = less common type. All times America/Los_Angeles.
 </footer>
 
 <script>
@@ -416,6 +421,33 @@ const state = {
 const routes = new Map();   // callsign → {dest, orig:{iata,city,lat,lon}} | {unknown:true}
 const landed = new Map();   // hex → {flight, at}
 const POLL_MS = 20000;
+const RARE = new Set(["747", "A340", "A380", "OTHER"]);  // worth a ★ for spotters
+
+// AbortSignal.timeout isn't in older Safari — fall back to a manual controller
+function tmo(ms) {
+  if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) return AbortSignal.timeout(ms);
+  const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal;
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode / quota */ } }
+};
+// callsign → aircraft type actually observed on the live feed. The free schedule
+// feed usually omits equipment, so this lets the schedule board confirm types
+// for flights this browser has watched arrive before.
+const seenTypes = store.get("laxwb_seen", {});
+let seenDirty = false;
+function learnType(cs, t) {
+  if (!cs || !t) return;
+  const cur = seenTypes[cs];
+  if (!cur || cur.t !== t || Date.now() - cur.at > 6 * 3600000) { seenTypes[cs] = { t, at: Date.now() }; seenDirty = true; }
+}
+function flushSeen() {
+  if (!seenDirty) return;
+  const keys = Object.keys(seenTypes);
+  if (keys.length > 1500) keys.sort((a, b) => seenTypes[a].at - seenTypes[b].at).slice(0, keys.length - 1500).forEach(k => delete seenTypes[k]);
+  store.set("laxwb_seen", seenTypes); seenDirty = false;
+}
 
 /* ============================== DATA FETCH ============================== */
 const AC_SOURCES = [
@@ -428,7 +460,7 @@ async function fetchAircraft() {
   for (let i = 0; i < AC_SOURCES.length; i++) {
     const idx = (srcIdx + i) % AC_SOURCES.length;
     try {
-      const r = await fetch(AC_SOURCES[idx](250), { signal: AbortSignal.timeout(9000) });
+      const r = await fetch(AC_SOURCES[idx](250), { signal: tmo(9000) });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const j = await r.json();
       if (!Array.isArray(j.ac)) throw new Error("bad payload");
@@ -445,14 +477,17 @@ async function fetchRoutes(list) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ planes: list.map(a => ({ callsign: a.cs, lat: a.lat, lng: a.lon })) }),
-      signal: AbortSignal.timeout(9000)
+      signal: tmo(9000)
     });
     if (!r.ok) return;
     const arr = await r.json();
     for (const it of (Array.isArray(arr) ? arr : [])) {
       if (!it || !it.callsign) continue;
       const codes = (it._airport_codes_iata || it.airport_codes || "");
-      if (!codes || codes === "unknown") { routes.set(it.callsign, { unknown: true }); continue; }
+      // `plausible` is the route DB's own check of the route against the aircraft's
+      // position — an implausible match usually means a reused callsign
+      const implausible = it.plausible === false || it.plausible === 0;
+      if (!codes || codes === "unknown" || implausible) { routes.set(it.callsign, { unknown: true, at: Date.now() }); continue; }
       const legs = codes.split("-").filter(Boolean);
       const dest = legs[legs.length - 1];
       const iLax = legs.lastIndexOf("LAX");
@@ -460,6 +495,7 @@ async function fetchRoutes(list) {
       const det = (it.airports || []).find(ap => ap.iata === origCode || ap.icao === origCode);
       routes.set(it.callsign, {
         dest,
+        viaLax: iLax > 0 && iLax < legs.length - 1,   // multi-leg route with an LAX stop
         orig: {
           iata: origCode,
           city: det ? (det.location || det.name || "") : (AIRPORTS[origCode] ? AIRPORTS[origCode][2] : ""),
@@ -474,15 +510,24 @@ async function fetchRoutes(list) {
 /* ============================== CLASSIFICATION ============================== */
 function detectFlow(acs) {
   if (!state.flowAuto) return;
+  // Count ARRIVALS only: low, not climbing, lined up with the runways and still on
+  // the approach side of the field. Departures track the same heading on the far
+  // side, and during overnight over-ocean ops they'd otherwise outvote arrivals.
   let w = 0, e = 0;
+  const h = rad(RUNWAY_TRUE);
   for (const a of acs) {
     if (a.lat == null || typeof a.alt_baro !== "number") continue;
     if (a.alt_baro > 6000 || !(a.gs > 90) || a.track == null) continue;
-    if (distNm(a.lat, a.lon, LAX.lat, LAX.lon) > 14) continue;
-    if (angleDiff(a.track, RUNWAY_TRUE) < 35) w++;
-    else if (angleDiff(a.track, (RUNWAY_TRUE + 180) % 360) < 35) e++;
+    if (typeof a.baro_rate === "number" && a.baro_rate > 300) continue;
+    const p = localNm(a.lat, a.lon, MIDFIELD);
+    const along = p.e * Math.sin(h) + p.n * Math.cos(h);  // + = west of the field
+    const cross = p.e * Math.cos(h) - p.n * Math.sin(h);
+    if (Math.abs(cross) > 2.5 || Math.abs(along) > 16 || Math.abs(along) < 0.8) continue;
+    if (along < 0 && angleDiff(a.track, RUNWAY_TRUE) < 25) w++;
+    else if (along > 0 && angleDiff(a.track, (RUNWAY_TRUE + 180) % 360) < 25) e++;
   }
-  if (w + e >= 2) state.flow = w >= e ? "W" : "E";
+  if (w > e) state.flow = "W";
+  else if (e > w && e >= 2) state.flow = "E";
 }
 
 // predicted arrival runway + phase for one aircraft
@@ -505,7 +550,20 @@ function predictRunway(a, dist) {
     north = (b >= 245 || b < 60);
   }
   const rwy = flow === "W" ? (north ? "24R" : "25L") : (north ? "06L/R" : "07L/R");
-  return { rwy, onFinal };
+  // ETA: straight-line distance ÷ current speed is far too optimistic (arrivals
+  // slow to ≤250 kt below 10,000 ft and are vectored onto a long final), so route
+  // via a 10 NM final fix and model the slowdown.
+  let etaMin = null;
+  if (a.gs > 60) {
+    if (onFinal) {
+      etaMin = (-along) / Math.max(Math.min(a.gs, 180), 125) * 60 + 0.4;
+    } else {
+      const d1 = Math.hypot(p.e + Math.sin(h) * 10, p.n + Math.cos(h) * 10); // to the 10 NM fix
+      const slow = Math.min(d1, 30), fast = d1 - slow;
+      etaMin = fast / a.gs * 60 + slow / Math.min(a.gs, 240) * 60 + 10 / 150 * 60;
+    }
+  }
+  return { rwy, onFinal, etaMin };
 }
 
 function phaseOf(a, dist, onFinal) {
@@ -527,20 +585,23 @@ function buildFlight(a) {
   // inbound determination: route DB says LAX → true; says elsewhere → false;
   // no route data → null (shown as unconfirmed) only if it's plausibly arriving
   let inbound = null;
+  const toLax = a.track != null ? angleDiff(a.track, bearingDeg(a.lat, a.lon, LAX.lat, LAX.lon)) : 999;
+  const closing = toLax < 32 && a.gs > 60;
+  const overflight = typeof a.alt_baro === "number" && a.alt_baro > 32000 && dist < 100 &&
+                     !(typeof a.baro_rate === "number" && a.baro_rate < -500);
+  const climbingAway = toLax > 110 && dist > 60;   // pointed away and well clear: not arriving
   if (route && !route.unknown && route.dest) {
-    inbound = route.dest === "LAX";
-  } else {
-    const toLax = a.track != null ? angleDiff(a.track, bearingDeg(a.lat, a.lon, LAX.lat, LAX.lon)) : 999;
-    const closing = toLax < 32 && a.gs > 60;
-    const overflight = typeof a.alt_baro === "number" && a.alt_baro > 32000 && dist < 100 &&
-                       !(typeof a.baro_rate === "number" && a.baro_rate < -500);
-    if (!closing || overflight) inbound = false;
+    if (route.dest === "LAX") inbound = !climbingAway;
+    else if (route.viaLax) inbound = closing && !overflight;   // e.g. SYD-LAX-JFK: decide by geometry
+    else inbound = false;
+  } else if (!closing || overflight) {
+    inbound = false;
   }
 
-  const { rwy, onFinal } = predictRunway(a, dist);
+  const { rwy, onFinal, etaMin } = predictRunway(a, dist);
   const gs = a.gs > 60 ? a.gs : null;
-  const etaMin = gs ? (dist / gs) * 60 : null;
   const airline = AIRLINES[cs.slice(0, 3)] || "";
+  if (inbound === true) learnType(cs, t);
 
   return {
     hex: a.hex, cs: cs || a.r || a.hex, reg: a.r || "", type: t,
@@ -555,8 +616,10 @@ function buildFlight(a) {
 }
 
 /* ============================== MAIN POLL ============================== */
+let polling = false;
 async function poll() {
-  if (state.paused) return;
+  if (state.paused || polling || document.hidden) return;
+  polling = true;
   const statusEl = document.getElementById("status");
   try {
     const acs = await fetchAircraft();
@@ -565,8 +628,13 @@ async function poll() {
     const wbAir = acs.filter(a => a.lat != null && WB[(a.t || "").toUpperCase()] && a.alt_baro !== "ground");
 
     // route lookups for new callsigns
+    // (unknown routes are retried after 10 min — the DB often fills in later)
     const need = wbAir.map(a => ({ cs: (a.flight || "").trim(), lat: a.lat, lon: a.lon }))
-                      .filter(x => x.cs && !routes.has(x.cs));
+                      .filter(x => {
+                        if (!x.cs) return false;
+                        const r = routes.get(x.cs);
+                        return !r || (r.unknown && Date.now() - (r.at || 0) > 10 * 60000);
+                      });
     if (need.length) await fetchRoutes(need.slice(0, 80));
 
     const built = wbAir.map(buildFlight).filter(Boolean);
@@ -591,13 +659,27 @@ async function poll() {
     state.flights = inbound;
     state.ghosts = ghosts;
     state.lastOk = Date.now();
-    statusEl.textContent = `live · ${new Date().toLocaleTimeString("en-US", { timeZone: TZ, hour12: false })}`;
-    statusEl.classList.remove("err");
+    state.feedErr = false;
+    flushSeen();
   } catch (e) {
-    statusEl.textContent = "feed error — retrying";
-    statusEl.classList.add("err");
+    state.feedErr = true;
   }
+  polling = false;
+  updateStatus();
   render();
+}
+
+function updateStatus() {
+  const el = document.getElementById("status");
+  const age = state.lastOk ? Math.round((Date.now() - state.lastOk) / 1000) : null;
+  if (state.paused) { el.textContent = "paused"; el.classList.remove("err"); return; }
+  if (state.feedErr || (age != null && age > 75)) {
+    el.textContent = age == null ? "feed error — retrying" : `feed stale (${age}s old) — retrying`;
+    el.classList.add("err");
+  } else if (age != null) {
+    el.textContent = `live · updated ${age}s ago`;
+    el.classList.remove("err");
+  }
 }
 
 /* ============================== RENDER: TABLE ============================== */
@@ -617,7 +699,13 @@ function renderTable() {
   document.getElementById("acCount").textContent = `${state.flights.length} inbound`;
   document.getElementById("liveSub").textContent = state.filters.size < FAMILIES.length ? " (filtered)" : "";
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="9"><div class="empty">No widebodies inbound within 250 NM right now.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="9"><div class="empty">${
+      !state.lastOk && state.feedErr
+        ? `Can't reach the live ADS-B feeds yet — retrying every 20 s.<br><br>If this never clears and you opened the file by double-clicking, your browser may be blocking requests from <code>file://</code>. Serve the folder instead: run <code>python3 -m http.server</code> in it and open <code>http://localhost:8000/</code>.`
+        : !state.lastOk ? "Waiting for first ADS-B sweep…"
+        : state.flights.length ? "All inbound widebodies are hidden by the fleet filter."
+        : "No widebodies inbound within 250 NM right now."
+    }</div></td></tr>`;
     return;
   }
   body.innerHTML = rows.map(f => {
@@ -628,7 +716,7 @@ function renderTable() {
     const etaTxt = f.phase === "LANDED" ? "landed" :
       f.eta ? `${fmtTime(f.eta)} <span class="eta-min">${Math.round(f.etaMin)}m</span>` : "—";
     return `<tr data-hex="${esc(f.hex)}" class="${f.hex === state.sel ? "sel" : ""}${f.phase === "LANDED" ? " dim" : ""}">
-      <td><span class="flight">${esc(f.cs)}</span><span class="sub">${esc(f.airline || f.reg)}</span></td>
+      <td><span class="flight">${esc(f.cs)}</span>${RARE.has(f.family) ? ` <span class="rare" title="less common type">★</span>` : ""}<span class="sub">${esc([f.airline, f.reg].filter(Boolean).join(" · "))}</span></td>
       <td><span class="fam"><span class="dot" style="background:${c}"></span>${esc(f.type)}</span><span class="sub">${esc(f.typeName)}</span></td>
       <td>${origTxt}</td>
       <td class="num">${f.phase === "LANDED" ? "—" : Math.round(f.dist)}</td>
@@ -801,12 +889,55 @@ canvas.addEventListener("click", () => {
 const schedContent = document.getElementById("schedContent");
 let schedCache = null, schedAt = 0;
 
+// aviationstack stamps schedule times as LOCAL airport wall-clock time but labels
+// them "+00:00". Parsing them as UTC shifts every LAX arrival by 7–8 hours, so
+// treat a "+00:00"/missing offset as wall-clock time in the airport's zone. A real
+// offset or a "Z" suffix is trusted as-is.
+function tzOffsetMs(ts, tz) {
+  const p = {};
+  new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(new Date(ts)).forEach(x => { p[x.type] = x.value; });
+  return Date.UTC(+p.year, p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - Math.floor(ts / 1000) * 1000;
+}
+function avTime(s, tz) {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d\d)-(\d\d)[T ](\d\d):(\d\d)(?::(\d\d))?(?:\.\d+)?(.*)$/.exec(s);
+  if (!m) { const d = new Date(s); return isNaN(d) ? null : d; }
+  const suffix = m[7].trim();
+  if (suffix && suffix !== "+00:00" && suffix !== "+0000") { const d = new Date(s); if (!isNaN(d)) return d; }
+  const wall = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  let zone = tz || TZ, ts;
+  try { ts = wall - tzOffsetMs(wall, zone); ts = wall - tzOffsetMs(ts, zone); }
+  catch (e) { ts = wall - tzOffsetMs(wall, TZ); }
+  return new Date(ts);
+}
+
+// the operating flight behind a row (codeshare rows point at it)
+function opFlight(f) {
+  const cs = f.flight && f.flight.codeshared;
+  if (cs && cs.flight_iata) return {
+    iata: String(cs.flight_iata).toUpperCase(), icao: String(cs.flight_icao || "").toUpperCase(),
+    airline: cs.airline_name ? String(cs.airline_name).replace(/\b\w/g, c => c.toUpperCase()) : "",
+    al: String(cs.airline_iata || "").toUpperCase()
+  };
+  return {
+    iata: (f.flight && f.flight.iata) || "", icao: ((f.flight && f.flight.icao) || "").toUpperCase(),
+    airline: (f.airline && f.airline.name) || "", al: ((f.airline && f.airline.iata) || "").toUpperCase()
+  };
+}
+
 function classifySched(f) {
   const raw = ((f.aircraft && (f.aircraft.icao || f.aircraft.iata)) || "").toUpperCase().trim();
   const icao = WB[raw] ? raw : IATA_TYPE[raw];
-  if (icao && WB[icao]) return { family: WB[icao][0], name: WB[icao][1], confirmed: true };
+  if (icao && WB[icao]) return { family: WB[icao][0], name: WB[icao][1], code: icao, confirmed: true };
+  if (raw) return null;                       // equipment given and it isn't a widebody
+  const op = opFlight(f);
+  // type this browser has actually watched this flight arrive with
+  const seen = op.icao && seenTypes[op.icao];
+  if (seen && WB[seen.t]) return { family: WB[seen.t][0], name: WB[seen.t][1] + " · seen on live feed", code: seen.t, confirmed: true };
   // no equipment info → heuristics
-  const al = f.airline && f.airline.iata;
+  const al = op.al;
   const org = f.departure && f.departure.iata;
   const ap = org && AIRPORTS[org.toUpperCase()];
   const far = ap ? distNm(ap[0], ap[1], LAX.lat, LAX.lon) > 2600 : false;
@@ -826,6 +957,7 @@ function schedRunway(f) {
 const laDay = d => d.toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" });
 
 function renderSchedule() {
+  schedMeta();
   if (!schedCache) return;
   const showLikely = document.getElementById("likelyToggle").checked;
   const now = Date.now();
@@ -834,16 +966,20 @@ function renderSchedule() {
   const seen = new Set();
   const rows = [];
   for (const f of schedCache) {
-    if (f.flight && f.flight.codeshared) continue; // dedupe codeshares
-    const sched = f.arrival && (f.arrival.scheduled || f.arrival.estimated);
-    const t = sched ? new Date(sched) : null;
+    const arr = f.arrival || {};
+    const sched = arr.scheduled || arr.estimated;
+    const t = avTime(sched, arr.timezone);
     if (!t || t.getTime() < lo || t.getTime() > hi) continue;
-    const key = `${(f.flight && f.flight.iata) || (f.airline && f.airline.iata) || ""}|${sched}`;
-    if (seen.has(key)) continue; // today+tomorrow queries can overlap
-    seen.add(key);
+    // one row per operating flight: codeshare rows collapse onto it (and stand in
+    // for it when the operating row itself isn't in the pages we fetched)
+    const op = opFlight(f);
+    const key = `${op.iata || op.al}|${sched}`;
+    if (seen.has(key)) continue;
     const cls = classifySched(f);
     if (!cls || (!cls.confirmed && !showLikely)) continue;
-    rows.push({ f, cls, t });
+    if (cls.family && !state.filters.has(cls.family)) continue;   // fleet filter chips
+    seen.add(key);
+    rows.push({ f, cls, t, op });
   }
   rows.sort((a, b) => a.t.getTime() - b.t.getTime());
   if (!rows.length) {
@@ -855,8 +991,13 @@ function renderSchedule() {
       <th>Sched</th><th>Est/Actual</th><th>Flight</th><th>Airline</th><th>From</th>
       <th>Aircraft</th><th>Rwy*</th><th>Status</th>
     </tr></thead><tbody>` +
-    rows.map(({ f, cls, t }) => {
-      const est = f.arrival && (f.arrival.actual || f.arrival.estimated);
+    rows.map(({ f, cls, t, op }) => {
+      const arr = f.arrival || {};
+      const estT = avTime(arr.actual || arr.estimated, arr.timezone);
+      const delay = +arr.delay > 0 ? +arr.delay : 0;
+      const estTxt = estT && Math.abs(estT - t) >= 60000 ? fmtTime(estT)
+                   : delay ? fmtTime(new Date(t.getTime() + delay * 60000)) : "—";
+      const lateTxt = delay >= 15 ? ` <span class="late">+${delay}m</span>` : "";
       const past = t.getTime() < now - 5 * 60000;
       let divider = "";
       const day = laDay(t);
@@ -868,14 +1009,14 @@ function renderSchedule() {
       const ap = org.iata && AIRPORTS[org.iata.toUpperCase()];
       const famDot = cls.family ? `<span class="dot" style="background:${FAM_COLOR[cls.family]}"></span>` :
                                   `<span class="dot" style="background:var(--c-other)"></span>`;
-      const acTxt = cls.confirmed ? `<span class="fam">${famDot}${esc((f.aircraft.icao || f.aircraft.iata || "").toUpperCase())}</span><span class="sub">${esc(cls.name)}</span>`
+      const acTxt = cls.confirmed ? `<span class="fam">${famDot}${esc(cls.code)}</span>${RARE.has(cls.family) ? ` <span class="rare" title="less common type">★</span>` : ""}<span class="sub">${esc(cls.name)}</span>`
                                   : `<span class="likely">likely WB</span><span class="sub">type not in feed</span>`;
       const st = (f.flight_status || "scheduled").toLowerCase();
       return divider + `<tr class="${past ? "dim" : ""}">
         <td class="num">${t ? fmtTime(t) : "—"}</td>
-        <td class="num">${est ? fmtTime(new Date(est)) : "—"}</td>
-        <td><span class="flight">${esc((f.flight && f.flight.iata) || "")}</span></td>
-        <td style="font-family:var(--sans)">${esc((f.airline && f.airline.name) || "")}</td>
+        <td class="num">${estTxt}${lateTxt}</td>
+        <td><span class="flight">${esc(op.iata)}</span></td>
+        <td style="font-family:var(--sans)">${esc(op.airline)}</td>
         <td>${esc(org.iata || "—")}<span class="sub">${esc(ap ? ap[2] : (org.airport || ""))}</span></td>
         <td>${acTxt}</td>
         <td><span class="rwy">${schedRunway(f)}</span></td>
@@ -884,14 +1025,31 @@ function renderSchedule() {
     }).join("") + "</tbody></table>";
 }
 
-const SCHED_TTL = 60 * 60000;  // aviationstack free tier = 100 req/month, so cache for an hour
-const SCHED_PAGES = 3;         // up to 3×100 flights per day queried
+const SCHED_TTL = 3 * 3600000; // aviationstack free tier = 100 req/month, so cache for 3 hours
+const SCHED_PAGES = 3;         // max pages (×100 rows) per query
+
+// rough count of aviationstack requests this browser has spent this month
+function bumpUsage() {
+  const m = new Date().toISOString().slice(0, 7);
+  const u = store.get("laxwb_avuse", null);
+  const n = (u && u.m === m ? u.n : 0) + 1;
+  store.set("laxwb_avuse", { m, n });
+}
+function schedMeta() {
+  const el = document.getElementById("schedMeta");
+  if (!el) return;
+  if (!schedAt) { el.textContent = ""; return; }
+  const u = store.get("laxwb_avuse", null);
+  const used = u && u.m === new Date().toISOString().slice(0, 7) ? ` · ~${u.n} API requests used this month` : "";
+  el.textContent = `· updated ${fmtTime(new Date(schedAt))}${schedVia === "direct" ? used : ""}`;
+}
+let schedVia = "";
 const laDateStr = offsetDays =>
   new Date(Date.now() + offsetDays * 86400000).toLocaleDateString("en-CA", { timeZone: TZ });
 
-function saveSched(data) {
-  schedCache = data; schedAt = Date.now();
-  try { localStorage.setItem("laxwb_sched", JSON.stringify({ at: schedAt, data })); } catch (e) { /* quota */ }
+function saveSched(data, via) {
+  schedCache = data; schedAt = Date.now(); schedVia = via || "";
+  store.set("laxwb_sched", { at: schedAt, via: schedVia, data });
   renderSchedule();
 }
 
@@ -901,7 +1059,7 @@ async function loadSchedule(force) {
     try {
       const c = JSON.parse(localStorage.getItem("laxwb_sched") || "null");
       if (c && Array.isArray(c.data) && Date.now() - c.at < SCHED_TTL) {
-        schedCache = c.data; schedAt = c.at; renderSchedule(); return;
+        schedCache = c.data; schedAt = c.at; schedVia = c.via || ""; renderSchedule(); return;
       }
     } catch (e) { /* corrupt cache — refetch */ }
   }
@@ -911,10 +1069,10 @@ async function loadSchedule(force) {
   //    Skipped for a local file, where a relative /api fetch can't resolve.
   if (!isLocal) {
     try {
-      const r = await fetch("/api/lax-arrivals", { signal: AbortSignal.timeout(25000) });
+      const r = await fetch("/api/lax-arrivals", { signal: tmo(25000) });
       if (r.ok) {
         const j = await r.json();
-        if (Array.isArray(j.data)) { saveSched(j.data); return; }
+        if (Array.isArray(j.data)) { saveSched(j.data, "proxy"); return; }
       }
     } catch (e) { /* not running behind the proxy — fall through */ }
   }
@@ -943,15 +1101,16 @@ async function loadSchedule(force) {
   // Fetch one page. Resolves to an array, or throws an Error whose .code is the
   // aviationstack error code (or "network"). API errors don't retry the other
   // protocol (same result); only a transport failure does.
-  async function fetchPage(flightDate, offset) {
+  async function fetchPage(extra, offset) {
     let netErr = null;
     for (const proto of (working ? [working] : protos)) {
       let url = `${proto}://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}` +
         `&arr_iata=LAX&limit=100&offset=${offset}`;
-      if (flightDate) url += `&flight_date=${flightDate}`;
+      for (const k in extra) url += `&${k}=${encodeURIComponent(extra[k])}`;
       let j;
+      bumpUsage();
       try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+        const r = await fetch(url, { signal: tmo(20000) });
         j = await r.json();
       } catch (e) { netErr = "network"; continue; }   // transport failure → try next protocol
       if (j.error) {
@@ -965,10 +1124,10 @@ async function loadSchedule(force) {
     const e = new Error(netErr || "network"); e.code = netErr || "network"; throw e;
   }
 
-  async function collect(flightDate) {
+  async function collect(extra, pages) {
     const out = [];
-    for (let off = 0; off < SCHED_PAGES * 100; off += 100) {
-      const data = await fetchPage(flightDate, off);
+    for (let off = 0; off < (pages || SCHED_PAGES) * 100; off += 100) {
+      const data = await fetchPage(extra, off);
       out.push(...data);
       if (data.length < 100) break;
     }
@@ -976,17 +1135,22 @@ async function loadSchedule(force) {
   }
 
   try {
-    const all = await collect(null);           // real-time baseline (free-compatible)
+    // Baseline, allowed on every plan: flights in the air now, then those still
+    // to depart. Asking by status spends the small quota on upcoming arrivals
+    // instead of ones that have already landed.
+    const all = await collect({ flight_status: "active" }, 2);
+    try { all.push(...await collect({ flight_status: "scheduled" }, SCHED_PAGES)); }
+    catch (e) { if (!all.length) throw e; }
     if (!datedBlocked) {                        // bonus: explicit today + tomorrow (paid plans)
       for (const fd of [laDateStr(0), laDateStr(1)]) {
-        try { all.push(...await collect(fd)); }
+        try { all.push(...await collect({ flight_date: fd })); }
         catch (e) {
           if (SKIP_DATED.has(e.code)) { localStorage.setItem("laxwb_nodated", "1"); break; }
           /* other bonus errors: ignore, keep the baseline */
         }
       }
     }
-    saveSched(all);
+    saveSched(all, "direct");
   } catch (e) {
     if (FATAL[e.code]) schedSetup(`aviationstack: ${esc(FATAL[e.code])}`);
     else if (e.code === "function_access_restricted")
@@ -1076,8 +1240,11 @@ document.getElementById("pauseBtn").addEventListener("click", function () {
   state.paused = !state.paused;
   this.textContent = state.paused ? "▶ resume" : "⏸ pause";
   this.classList.toggle("on", state.paused);
+  updateStatus();
   if (!state.paused) poll();
 });
+// polling stops while the tab is hidden; catch up the moment it's visible again
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 document.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", function () {
   state.range = +this.dataset.range;
   document.querySelectorAll("[data-range]").forEach(x => x.classList.toggle("on", x === this));
@@ -1101,6 +1268,7 @@ setInterval(() => {
   document.getElementById("clock").textContent =
     new Date().toLocaleTimeString("en-US", { timeZone: TZ, hour12: false }) + " PT";
   updateFlowBadge();
+  updateStatus();
 }, 1000);
 
 new ResizeObserver(() => drawRadar()).observe(document.getElementById("radarWrap"));
