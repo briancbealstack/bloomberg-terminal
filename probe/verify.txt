@@ -1,0 +1,55 @@
+LAX feed verification — 2026-11-17T07:21:18Z
+Code under test: commit 13f1f8c (HEAD of claude/lax-feed-verify == origin/claude/lax-widebody-tracker-mgbkid).
+Note: the LOCAL branch claude/lax-widebody-tracker-mgbkid was stale at 38e1f31 (no standalone/server.js feed proxy), so the run used 13f1f8c.
+No existing files modified.
+
+== STEP 1: server ==
+cd standalone && PORT=8765 node server.js  -> started OK:
+    LAX widebody tracker running:  http://localhost:8765
+    Leave this window open while you use it. Ctrl+C to stop.
+
+== STEP 2: curl -s -w '\nHTTP %{http_code}\n' http://localhost:8765/api/lax-feed | head -c 600 ==
+{"ac":[{"hex":"ac0ba7","type":"adsb_icao","flight":"UAL2854 ","r":"N87527","t":"B738","desc":"BOEING 737-800","ownOp":"UNITED AIRLINES INC","year":"2010","alt_baro":15750,"alt_geom":15625,"gs":303.5,"track":347.25,"baro_rate":-1792,"squawk":"2004","emergency":"none","category":"A3","nav_qnh":1018.4,"nav_altitude_mcp":10016,"nav_heading":331.17,"lat":36.892822,"lon":-121.936555,"nic":8,"rc":186,"seen_pos":0.306,"version":2,"nic_baro":1,"nac_p":9,"nac_v":1,"sil":3,"sil_type":"perhour","gva":2,"sda":2,"alert":0,"spi":0,"mlat":[],"tisb":[],"messages":72194,"seen":0,"rssi":-19.5,"dst":247.315,"dir"
+[...truncated at 600 bytes; full body 91550 bytes]
+HTTP 200
+
+== STEP 2 (node) ==
+source: "adsb.fi"
+top-level keys: ac,now,source
+ac entries: 169
+widebody (t prefix match): 25
+
+== STEP 3: POST /api/lax-routes ==
+request body: {"planes":[{"callsign":"CCA984","lat":36.875378,"lng":-121.499773},{"callsign":"FJI811","lat":31.925629,"lng":-120.989685},{"callsign":"AAL73","lat":32.09935,"lng":-120.928381},{"callsign":"CAL007","lat":35.614426,"lng":-120.271626},{"callsign":"UAL218","lat":37.519775,"lng":-119.919628},{"callsign":"UAL98","lat":33.807026,"lng":-119.755955}]}
+status: 200
+response body: []
+
+== STEP 4: Playwright ==
+#status: "live via adsb.fi · updated 6s ago"
+rows #liveBody tr[data-hex]: 1
+#flowBadge: "WEST FLOW · landing 24R/25L"
+#acCount: "1 inbound"
+first 1 rows:
+  1. SIA7408 | Singapore Airlines · 9V-DHD | 	 | B77L | 777-200LR / 777F | 	LAX?	14	3700	182	23:25 5m	25L	FINAL
+console errors / pageerrors after 6s (0):
+
+== STEP 5: +25s ==
+#status: "live via adsb.fi · updated 11s ago"
+rows #liveBody tr[data-hex]: 1
+new console errors / pageerrors during the 25s (0):
+
+== STEP 3 follow-up: direct reachability of route sources from this container ==
+https://api.adsb.lol/v2/callsign/UAL98    -> curl: (35) Recv failure: Connection reset by peer
+https://api.adsbdb.com/v0/callsign/UAL98  -> curl: (56) CONNECT tunnel failed, response 403 (blocked by network policy)
+https://opendata.adsb.fi/...              -> HTTP 200 (feed source reachable)
+=> /api/lax-routes returned 200 with [] because neither route source is reachable here. Expected; not a failure.
+
+== STEP 6 ==
+Server stopped (port 8765 no longer answering).
+
+== SUMMARY ==
+feed: PASS (HTTP 200, source adsb.fi, 169 aircraft, 25 widebodies in feed)
+routes: endpoint OK (200) but empty — upstream route hosts unreachable from this environment
+page: PASS (status 'live via adsb.fi', 1 inbound widebody row, 0 console errors/pageerrors)
+polling: PASS (at +25s status read 'updated 11s ago', i.e. a refresh occurred after the first sample; row count still 1)
+Origin column shows 'LAX?' for the row, consistent with route lookups being unavailable here.
