@@ -632,7 +632,11 @@ function buildFlight(a) {
   // no route data → null (shown as unconfirmed) only if it's plausibly arriving
   let inbound = null;
   const toLax = a.track != null ? angleDiff(a.track, bearingDeg(a.lat, a.lon, LAX.lat, LAX.lon)) : 999;
-  const closing = toLax < 32 && a.gs > 60;
+  // heading at the field — or descending toward it on an arrival path that isn't
+  // pointed straight at LAX (used when the route lookup has nothing for a flight)
+  const descendingIn = typeof a.alt_baro === "number" && a.alt_baro < 24000 && dist < 120 && toLax < 70 &&
+                       typeof a.baro_rate === "number" && a.baro_rate < -300;
+  const closing = (toLax < 32 || descendingIn) && a.gs > 60;
   const overflight = typeof a.alt_baro === "number" && a.alt_baro > 32000 && dist < 100 &&
                      !(typeof a.baro_rate === "number" && a.baro_rate < -500);
   const climbingAway = toLax > 110 && dist > 60;   // pointed away and well clear: not arriving
