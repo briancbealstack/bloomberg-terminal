@@ -249,7 +249,7 @@
 </main>
 
 <footer>
-  <b>Data:</b> live positions via adsb.lol / airplanes.live (community ADS-B, no key needed); routes via adsb.lol route DB; schedules via aviationstack (optional key).
+  <b>Data:</b> live positions via adsb.fi / adsb.lol (community ADS-B, no key needed); routes via adsb.lol / adsbdb; schedules via aviationstack (optional key).
   &nbsp;·&nbsp; <b>*Runway is a prediction</b>, from detected flow + approach corridor (normal LAX west ops land 24R north / 25L south; inner runways 24L/25R are used at peaks; overnight over-ocean and Santa Ana east ops land on the 06/07s) — not an ATC assignment.
   &nbsp;·&nbsp; ETA is an estimate (routed via a 10 NM final, with approach slow-down). ★ = less common type. All times America/Los_Angeles.
 </footer>
@@ -450,9 +450,20 @@ function flushSeen() {
 }
 
 /* ============================== DATA FETCH ============================== */
+// The public ADS-B feeds don't send CORS headers, so a page can't read them
+// directly. In order: (1) this app's own server (/api/lax-feed — the bundled
+// local server, Vercel or Next.js), which fetches them server-side; (2) the
+// feeds directly, in case one allows it; (3) public CORS relays as a last
+// resort for a double-clicked file. The first one that works is remembered.
+const IS_FILE = location.protocol === "file:";
+const FI_URL = `https://opendata.adsb.fi/api/v3/lat/${LAX.lat}/lon/${LAX.lon}/dist/250`;
 const AC_SOURCES = [
-  r => `https://api.adsb.lol/v2/point/${LAX.lat}/${LAX.lon}/${r}`,
-  r => `https://api.airplanes.live/v2/point/${LAX.lat}/${LAX.lon}/${r}`
+  ...(IS_FILE ? [] : [["server", () => "/api/lax-feed"]]),
+  ["adsb.fi", () => FI_URL],
+  ["adsb.lol", () => `https://api.adsb.lol/v2/point/${LAX.lat}/${LAX.lon}/250`],
+  ["adsb.fi via relay", () => "https://api.allorigins.win/raw?url=" + encodeURIComponent(FI_URL + "?_=" + Math.floor(Date.now() / 10000))],
+  ["adsb.fi via relay", () => "https://corsproxy.io/?url=" + encodeURIComponent(FI_URL)],
+  ["adsb.fi via relay", () => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(FI_URL)]
 ];
 let srcIdx = 0;
 
@@ -460,27 +471,62 @@ async function fetchAircraft() {
   for (let i = 0; i < AC_SOURCES.length; i++) {
     const idx = (srcIdx + i) % AC_SOURCES.length;
     try {
-      const r = await fetch(AC_SOURCES[idx](250), { signal: tmo(9000) });
+      const r = await fetch(AC_SOURCES[idx][1](), { signal: tmo(8000), cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const j = await r.json();
-      if (!Array.isArray(j.ac)) throw new Error("bad payload");
+      const ac = Array.isArray(j.ac) ? j.ac : j.aircraft;
+      if (!Array.isArray(ac)) throw new Error("bad payload");
       srcIdx = idx;
-      return j.ac;
+      state.source = j.source ? j.source : AC_SOURCES[idx][0];
+      return ac;
     } catch (e) { /* try next source */ }
   }
   throw new Error("all ADS-B sources failed");
 }
 
+// route lookups: own server → adsb.lol route DB → adsbdb (one callsign each).
+// An endpoint that fails is skipped for 10 minutes so polls stay fast.
+const routeDead = {};
+async function adsbdbRoutes(list) {
+  const got = await Promise.all(list.map(async a => {
+    try {
+      const r = await fetch(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(a.cs)}`, { signal: tmo(7000) });
+      if (r.status === 404) return { callsign: a.cs, _airport_codes_iata: "unknown" };
+      if (!r.ok) return null;
+      const fr = ((await r.json()).response || {}).flightroute;
+      if (!fr || !fr.origin || !fr.destination) return { callsign: a.cs, _airport_codes_iata: "unknown" };
+      const o = fr.origin;
+      return { callsign: a.cs, _airport_codes_iata: `${o.iata_code}-${fr.destination.iata_code}`,
+        airports: [{ iata: o.iata_code, lat: o.latitude, lon: o.longitude, location: o.municipality, name: o.name }] };
+    } catch (e) { return null; }
+  }));
+  const ok = got.filter(Boolean);
+  if (!ok.length) throw new Error("adsbdb unreachable");
+  return ok;
+}
+
 async function fetchRoutes(list) {
+  const body = JSON.stringify({ planes: list.map(a => ({ callsign: a.cs, lat: a.lat, lng: a.lon })) });
+  const post = async url => {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body, signal: tmo(9000) });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (!Array.isArray(j)) throw new Error("bad payload");
+    return j;
+  };
+  const steps = [
+    ...(IS_FILE ? [] : [["server", () => post("/api/lax-routes")]]),
+    ["routeset", () => post("https://api.adsb.lol/api/0/routeset")],
+    ["adsbdb", () => adsbdbRoutes(list.slice(0, 6))]
+  ];
   try {
-    const r = await fetch("https://api.adsb.lol/api/0/routeset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ planes: list.map(a => ({ callsign: a.cs, lat: a.lat, lng: a.lon })) }),
-      signal: tmo(9000)
-    });
-    if (!r.ok) return;
-    const arr = await r.json();
+    let arr = null;
+    for (const [name, run] of steps) {
+      if (routeDead[name] > Date.now()) continue;
+      try { arr = await run(); break; }
+      catch (e) { routeDead[name] = Date.now() + 10 * 60000; }
+    }
+    if (!arr) return;
     for (const it of (Array.isArray(arr) ? arr : [])) {
       if (!it || !it.callsign) continue;
       const codes = (it._airport_codes_iata || it.airport_codes || "");
@@ -677,7 +723,7 @@ function updateStatus() {
     el.textContent = age == null ? "feed error — retrying" : `feed stale (${age}s old) — retrying`;
     el.classList.add("err");
   } else if (age != null) {
-    el.textContent = `live · updated ${age}s ago`;
+    el.textContent = `live${state.source ? " via " + state.source : ""} · updated ${age}s ago`;
     el.classList.remove("err");
   }
 }
@@ -701,7 +747,9 @@ function renderTable() {
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="9"><div class="empty">${
       !state.lastOk && state.feedErr
-        ? `Can't reach the live ADS-B feeds yet — retrying every 20 s.<br><br>If this never clears and you opened the file by double-clicking, your browser may be blocking requests from <code>file://</code>. Serve the folder instead: run <code>python3 -m http.server</code> in it and open <code>http://localhost:8000/</code>.`
+        ? `Can't reach the live ADS-B feeds yet — retrying every 20 s.<br><br>${IS_FILE
+            ? "The flight feeds can't be read by a page opened straight from disk. Start the bundled local server instead: double-click <code>START-windows.bat</code> (or run <code>node server.js</code>) and use <code>http://localhost:8765</code>."
+            : "The feed service may be down for a moment; this page will recover on its own when it returns."}`
         : !state.lastOk ? "Waiting for first ADS-B sweep…"
         : state.flights.length ? "All inbound widebodies are hidden by the fleet filter."
         : "No widebodies inbound within 250 NM right now."
@@ -1069,7 +1117,10 @@ async function loadSchedule(force) {
   //    Skipped for a local file, where a relative /api fetch can't resolve.
   if (!isLocal) {
     try {
-      const r = await fetch("/api/lax-arrivals", { signal: tmo(25000) });
+      // a key pasted in the app is passed along, so the server can use it when it
+      // has none of its own (and can reach the free HTTP-only plan for us)
+      const k = localStorage.getItem("laxwb_avkey") || "";
+      const r = await fetch("/api/lax-arrivals", { signal: tmo(60000), headers: k ? { "x-av-key": k } : {} });
       if (r.ok) {
         const j = await r.json();
         if (Array.isArray(j.data)) { saveSched(j.data, "proxy"); return; }

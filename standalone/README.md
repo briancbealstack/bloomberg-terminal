@@ -27,38 +27,33 @@ domestic traffic entirely.
 
 ## Running it
 
-Open `index.html` in a browser. That's it — the live tab is fully functional
-with zero setup.
+The public ADS-B feeds can't be read straight from a web page (they don't send
+CORS headers), so the app needs a small server to fetch them on its behalf.
+Opening `index.html` by double-clicking it will not load live flights.
+
+**On your own computer** (needs [Node.js](https://nodejs.org) 18 or newer, nothing else):
+
+- Windows: double-click `START-windows.bat`
+- Mac / Linux: run `./start-mac-linux.command`, or `node server.js`
+
+Then use <http://localhost:8765>. Leave the server window open.
+
+**Hosted:** import this repo into [Vercel](https://vercel.com/new) (zero
+config). The functions in `api/` do the same job as the local server.
 
 ### Schedule board (needs a free API key)
 
 The scheduled-arrivals tab uses [aviationstack](https://aviationstack.com/)
-(free tier: 100 requests/month). Two ways to wire it up:
-
-1. **Vercel (recommended)** — import this repo into
-   [Vercel](https://vercel.com/new) (zero config: static site + one serverless
-   function) and set the `AVIATIONSTACK_KEY` environment variable. The included
-   `/api/lax-arrivals` proxy keeps the key server-side and caches responses for
-   an hour so all visitors share the same quota spend (~6 requests per cache
-   refresh: 2 days × up to 3 pages).
-2. **Paste a key in the app** — on the Schedule tab, enter your aviationstack
-   key; it's stored only in your browser (localStorage) and results are cached
-   locally for an hour. Note: on an `https://` host (e.g. GitHub Pages) this
-   requires an aviationstack plan that supports HTTPS.
-
-## Deployment
-
-- **GitHub Pages** — pushes to `main` deploy automatically via
-  `.github/workflows/deploy-pages.yml` (live tab keyless; schedule via
-  paste-a-key).
-- **Vercel** — import the repo, set `AVIATIONSTACK_KEY`, done. Both the static
-  app and the schedule proxy work.
+(free tier: 100 requests/month, today's flights only). Paste your key into the
+Schedule tab, or set `AVIATIONSTACK_KEY` in the server's environment. Either
+way the server makes the request, caches it for 3 hours, and keeps working
+with the free plan's HTTP-only restriction.
 
 ## Data sources & caveats
 
-- Live positions: [adsb.lol](https://adsb.lol) / [airplanes.live](https://airplanes.live)
-  community ADS-B networks (free, no key). Coverage is crowd-sourced.
-- Routes: adsb.lol route database (best effort — flights without route data show
+- Live positions: [adsb.fi](https://adsb.fi) (with adsb.lol as backup), community
+  ADS-B networks (free, no key, personal non-commercial use). Coverage is crowd-sourced.
+- Routes: adsb.lol route database, falling back to adsbdb (best effort — flights without route data show
   origin `LAX?` until confirmed).
 - Schedules: aviationstack. The free tier omits equipment type on many flights,
   hence the *likely widebody* heuristic.
