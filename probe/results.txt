@@ -1,0 +1,418 @@
+==================================================================
+PROBE 1-adsb.lol-point-null
+URL: GET https://api.adsb.lol/v2/point/33.9425/-118.4081/250
+Origin: null
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 35
+--- body (first 700 bytes; total 0 bytes) ---
+
+
+==================================================================
+PROBE 2-airplanes.live-point-null
+URL: GET https://api.airplanes.live/v2/point/33.9425/-118.4081/250
+Origin: null
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+HTTP/2 403 
+date: Tue, 17 Nov 2026 07:13:42 GMT
+content-type: application/json
+content-length: 164
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+referrer-policy: same-origin
+x-frame-options: SAMEORIGIN
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=Thd0jy377tas3BhIm3fcAJw6r4KYAblbuE1UlLnckAPy3Nj5TEYAHmXzOoUTt%2FegQV3LQCZAL90T8udNI2ZCrKehKlRFjdKMaKNQujBoIfXI3yOYVXCd0aBxY%2B11RhoLej4QOw%3D%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+cf-ray: a5bcef2f184ce607-IAD
+
+curl exit code: 0
+--- body (first 700 bytes; total 164 bytes) ---
+{"error": "Please contact us at contact@airplanes.live. Your email MUST include any links, a description of the project, and any information you deem appropriate."}
+
+==================================================================
+PROBE 3-adsb.fi-v2-null
+URL: GET https://opendata.adsb.fi/api/v2/lat/33.9425/lon/-118.4081/dist/250
+Origin: null
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+HTTP/2 200 
+date: Tue, 17 Nov 2026 07:13:42 GMT
+content-type: application/json
+server: cloudflare
+cache-control: no-store
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=O6FPoWpU%2BH4GqrI4RdlhVis%2Fk%2B7RMWk1E1bRlmLng%2B8e7NREtQi%2BMsnjEsSHGoxSUSvlbrCk1tgyglSJxqWDq1pHv9kqNcDD5BGK76s33rrqFaAKy2%2BPQBYcx3w5tQGD8Yo%3D"}]}
+cf-cache-status: DYNAMIC
+vary: accept-encoding
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+strict-transport-security: max-age=0; includeSubDomains
+x-content-type-options: nosniff
+cf-ray: a5bcef3129dbc9fe-IAD
+
+curl exit code: 0
+--- body (first 700 bytes; total 96394 bytes) ---
+{"now": 1794899622.001
+,"aircraft":[
+{"hex":"ac0ba7","type":"adsb_icao","flight":"UAL2854 ","r":"N87527","t":"B738","desc":"BOEING 737-800","ownOp":"UNITED AIRLINES INC","year":"2010","alt_baro":28000,"alt_geom":27725,"gs":400.1,"track":327.66,"baro_rate":-2176,"squawk":"2004","emergency":"none","category":"A3","nav_qnh":1013.6,"nav_altitude_mcp":6016,"nav_heading":310.08,"lat":36.410568,"lon":-121.632500,"nic":8,"rc":186,"seen_pos":0.052,"version":2,"nic_baro":1,"nac_p":9,"nac_v":1,"sil":3,"sil_type":"perhour","gva":2,"sda":2,"alert":0,"spi":0,"mlat":[],"tisb":[],"messages":59770,"seen":0.1,"rssi":-12.3,"dst":216.765,"dir":314.0},
+{"hex":"7808cb","type":"adsb_icao","flight":"CCA984  ","r":"
+
+==================================================================
+PROBE 4-adsb.fi-v3-null
+URL: GET https://opendata.adsb.fi/api/v3/lat/33.9425/lon/-118.4081/dist/250
+Origin: null
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+HTTP/2 200 
+date: Tue, 17 Nov 2026 07:13:43 GMT
+content-type: application/json
+server: cloudflare
+cache-control: no-store
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=fK37GZsffaE4lbElW%2BXEE1bUM0deWPnMo8%2F2b8Wh39TgYqVE0oo1McoedlplLXV2eDjrzzGtZHJlPSCnJvEAYvaXfM4ihgOu8iTZGh7RoFOVlc2JWrbbDPqLNWRS0DNcVCA%3D"}]}
+cf-cache-status: DYNAMIC
+vary: accept-encoding
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+strict-transport-security: max-age=0; includeSubDomains
+x-content-type-options: nosniff
+cf-ray: a5bcef33fd77177e-IAD
+
+curl exit code: 0
+--- body (first 700 bytes; total 96420 bytes) ---
+{"ac":[
+{"hex":"ac0ba7","type":"adsb_icao","flight":"UAL2854 ","r":"N87527","t":"B738","desc":"BOEING 737-800","ownOp":"UNITED AIRLINES INC","year":"2010","alt_baro":28000,"alt_geom":27725,"gs":400.1,"track":327.66,"baro_rate":-2176,"squawk":"2004","emergency":"none","category":"A3","nav_qnh":1013.6,"nav_altitude_mcp":6016,"nav_heading":310.08,"lat":36.410568,"lon":-121.632500,"nic":8,"rc":186,"seen_pos":0.052,"version":2,"nic_baro":1,"nac_p":9,"nac_v":1,"sil":3,"sil_type":"perhour","gva":2,"sda":2,"alert":0,"spi":0,"mlat":[],"tisb":[],"messages":59770,"seen":0.1,"rssi":-12.3,"dst":216.765,"dir":314.0},
+{"hex":"7808cb","type":"adsb_icao","flight":"CCA984  ","r":"B-2033","t":"B77W","desc":"BO
+
+==================================================================
+PROBE 5-routeset-OPTIONS-null
+URL: OPTIONS https://api.adsb.lol/api/0/routeset
+Origin: null
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 35
+--- body (first 700 bytes; total 0 bytes) ---
+
+
+==================================================================
+PROBE 6-routeset-POST-null
+URL: POST https://api.adsb.lol/api/0/routeset
+Origin: null
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 35
+--- body (FULL1; total 0 bytes) ---
+
+
+==================================================================
+PROBE 1-adsb.lol-point-localhost
+URL: GET https://api.adsb.lol/v2/point/33.9425/-118.4081/250
+Origin: http://localhost:8000
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 35
+--- body (first 700 bytes; total 0 bytes) ---
+
+
+==================================================================
+PROBE 2-airplanes.live-point-localhost
+URL: GET https://api.airplanes.live/v2/point/33.9425/-118.4081/250
+Origin: http://localhost:8000
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+HTTP/2 403 
+date: Tue, 17 Nov 2026 07:14:20 GMT
+content-type: application/json
+content-length: 164
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+referrer-policy: same-origin
+x-frame-options: SAMEORIGIN
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=fZLowZFZii5jpeF%2FojxSJCF0NhhQZ9CxUNP1a33E%2B3B7xW1%2B2i6dBqLYtOgGy9AQOrqz39rDmLmmiVNbVEzv%2F5ufdiACcH9P9T4hXEmV7krf7GevDxJkJYHLDuvRS8UviO95KQ%3D%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+cf-ray: a5bcf01c997d2552-IAD
+
+curl exit code: 0
+--- body (first 700 bytes; total 164 bytes) ---
+{"error": "Please contact us at contact@airplanes.live. Your email MUST include any links, a description of the project, and any information you deem appropriate."}
+
+==================================================================
+PROBE 3-adsb.fi-v2-localhost
+URL: GET https://opendata.adsb.fi/api/v2/lat/33.9425/lon/-118.4081/dist/250
+Origin: http://localhost:8000
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+HTTP/2 200 
+date: Tue, 17 Nov 2026 07:14:21 GMT
+content-type: application/json
+server: cloudflare
+cache-control: no-store
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=oz%2BiZQBFtfJ9%2BeWfoMf6cMPV1SowSPwCrSS1uKcLyUiG3ghdZzr3Rn63bwSU%2BpconEq%2BNcQZ5mGu5hexk9EzS4i7yHtTmG2VZ7CF6ublCfIsRNShgZBLEQDebbG6onbZPrA%3D"}]}
+cf-cache-status: DYNAMIC
+vary: accept-encoding
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+strict-transport-security: max-age=0; includeSubDomains
+x-content-type-options: nosniff
+cf-ray: a5bcf0202f1b8121-IAD
+
+curl exit code: 0
+--- body (first 700 bytes; total 95445 bytes) ---
+{"now": 1794899660.001
+,"aircraft":[
+{"hex":"ac0ba7","type":"adsb_icao","flight":"UAL2854 ","r":"N87527","t":"B738","desc":"BOEING 737-800","ownOp":"UNITED AIRLINES INC","year":"2010","alt_baro":26600,"alt_geom":26325,"gs":383.9,"track":327.55,"baro_rate":-2112,"squawk":"2004","emergency":"none","category":"A3","nav_qnh":1013.6,"nav_altitude_mcp":6016,"nav_heading":310.08,"lat":36.468604,"lon":-121.678142,"nic":8,"rc":186,"seen_pos":0.240,"version":2,"nic_baro":1,"nac_p":9,"nac_v":1,"sil":3,"sil_type":"perhour","gva":2,"sda":2,"alert":0,"spi":0,"mlat":[],"tisb":[],"messages":60924,"seen":0.0,"rssi":-16.5,"dst":220.734,"dir":314.3},
+{"hex":"7808cb","type":"adsb_icao","flight":"CCA984  ","r":"
+
+==================================================================
+PROBE 4-adsb.fi-v3-localhost
+URL: GET https://opendata.adsb.fi/api/v3/lat/33.9425/lon/-118.4081/dist/250
+Origin: http://localhost:8000
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+HTTP/2 200 
+date: Tue, 17 Nov 2026 07:14:21 GMT
+content-type: application/json
+server: cloudflare
+cache-control: no-store
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=qi1MpvIMy4ijAfuN9dMv%2FIKmKOIjXSjtm2xf1Q4c0ecMRIvfySHjjnRlIowMLckhP2jmLmkZHywQ1lvJIX9QrOMlPaoimqlj5e7FLnjlj03Eo%2B%2BhAW73HabpzSmKbU%2Fa5X8%3D"}]}
+cf-cache-status: DYNAMIC
+vary: accept-encoding
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+strict-transport-security: max-age=0; includeSubDomains
+x-content-type-options: nosniff
+cf-ray: a5bcf022be972265-IAD
+
+curl exit code: 0
+--- body (first 700 bytes; total 95471 bytes) ---
+{"ac":[
+{"hex":"ac0ba7","type":"adsb_icao","flight":"UAL2854 ","r":"N87527","t":"B738","desc":"BOEING 737-800","ownOp":"UNITED AIRLINES INC","year":"2010","alt_baro":26600,"alt_geom":26325,"gs":383.9,"track":327.55,"baro_rate":-2112,"squawk":"2004","emergency":"none","category":"A3","nav_qnh":1013.6,"nav_altitude_mcp":6016,"nav_heading":310.08,"lat":36.468604,"lon":-121.678142,"nic":8,"rc":186,"seen_pos":0.240,"version":2,"nic_baro":1,"nac_p":9,"nac_v":1,"sil":3,"sil_type":"perhour","gva":2,"sda":2,"alert":0,"spi":0,"mlat":[],"tisb":[],"messages":60924,"seen":0.0,"rssi":-16.5,"dst":220.734,"dir":314.3},
+{"hex":"7808cb","type":"adsb_icao","flight":"CCA984  ","r":"B-2033","t":"B77W","desc":"BO
+
+==================================================================
+PROBE 5-routeset-OPTIONS-localhost
+URL: OPTIONS https://api.adsb.lol/api/0/routeset
+Origin: http://localhost:8000
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 35
+--- body (first 700 bytes; total 0 bytes) ---
+
+
+==================================================================
+PROBE 6-routeset-POST-localhost
+URL: POST https://api.adsb.lol/api/0/routeset
+Origin: http://localhost:8000
+--- curl status line + response headers (verbatim, incl. any proxy CONNECT response) ---
+HTTP/1.1 200 Connection Established
+
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 35
+--- body (FULL1; total 0 bytes) ---
+
+
+==================================================================
+JSON ANALYSIS 1-adsb.lol-point-null
+not parseable as JSON / no body: FileNotFoundError(2, 'No such file or directory')
+
+==================================================================
+JSON ANALYSIS 2-airplanes.live-point-null
+top-level keys: ['error']
+no array key found; scalar values: {'error': 'Please contact us at contact@airplanes.live. Your email MUST include any links, a description of the project, and any information you deem appropriate.'}
+
+==================================================================
+JSON ANALYSIS 3-adsb.fi-v2-null
+top-level keys: ['now', 'aircraft', 'resultCount', 'ptime']
+aircraft array key: aircraft | entries: 178
+entries with `t` field: 174
+widebody `t` values with counts: {'A332': 1, 'A339': 1, 'A359': 4, 'B748': 1, 'B763': 2, 'B772': 2, 'B77L': 5, 'B77W': 6, 'B789': 3, 'B78X': 1}
+sample aircraft object with `t`:
+{
+ "hex": "ac0ba7",
+ "type": "adsb_icao",
+ "flight": "UAL2854 ",
+ "r": "N87527",
+ "t": "B738",
+ "desc": "BOEING 737-800",
+ "ownOp": "UNITED AIRLINES INC",
+ "year": "2010",
+ "alt_baro": 28000,
+ "alt_geom": 27725,
+ "gs": 400.1,
+ "track": 327.66,
+ "baro_rate": -2176,
+ "squawk": "2004",
+ "emergency": "none",
+ "category": "A3",
+ "nav_qnh": 1013.6,
+ "nav_altitude_mcp": 6016,
+ "nav_heading": 310.08,
+ "lat": 36.410568,
+ "lon": -121.6325,
+ "nic": 8,
+ "rc": 186,
+ "seen_pos": 0.052,
+ "version": 2,
+ "nic_baro": 1,
+ "nac_p": 9,
+ "nac_v": 1,
+ "sil": 3,
+ "sil_type": "perhour",
+ "gva": 2,
+ "sda": 2,
+ "alert": 0,
+ "spi": 0,
+ "mlat": [],
+ "tisb": [],
+ "messages": 59770,
+ "seen": 0.1,
+ "rssi": -12.3,
+ "dst": 216.765,
+ "dir": 314.0
+}
+
+==================================================================
+JSON ANALYSIS 4-adsb.fi-v3-null
+top-level keys: ['ac', 'msg', 'now', 'total', 'ctime', 'ptime']
+aircraft array key: ac | entries: 178
+entries with `t` field: 174
+widebody `t` values with counts: {'A332': 1, 'A339': 1, 'A359': 4, 'B748': 1, 'B763': 2, 'B772': 2, 'B77L': 5, 'B77W': 6, 'B789': 3, 'B78X': 1}
+sample aircraft object with `t`:
+{
+ "hex": "ac0ba7",
+ "type": "adsb_icao",
+ "flight": "UAL2854 ",
+ "r": "N87527",
+ "t": "B738",
+ "desc": "BOEING 737-800",
+ "ownOp": "UNITED AIRLINES INC",
+ "year": "2010",
+ "alt_baro": 28000,
+ "alt_geom": 27725,
+ "gs": 400.1,
+ "track": 327.66,
+ "baro_rate": -2176,
+ "squawk": "2004",
+ "emergency": "none",
+ "category": "A3",
+ "nav_qnh": 1013.6,
+ "nav_altitude_mcp": 6016,
+ "nav_heading": 310.08,
+ "lat": 36.410568,
+ "lon": -121.6325,
+ "nic": 8,
+ "rc": 186,
+ "seen_pos": 0.052,
+ "version": 2,
+ "nic_baro": 1,
+ "nac_p": 9,
+ "nac_v": 1,
+ "sil": 3,
+ "sil_type": "perhour",
+ "gva": 2,
+ "sda": 2,
+ "alert": 0,
+ "spi": 0,
+ "mlat": [],
+ "tisb": [],
+ "messages": 59770,
+ "seen": 0.1,
+ "rssi": -12.3,
+ "dst": 216.765,
+ "dir": 314.0
+}
+
+widebody callsigns from probe 1 usable for routeset: 0
+==================================================================
+NOTES / PROXY DIAGNOSTICS
+All 6 requests to api.adsb.lol (probes 1, 5, 6, both Origins) failed before any HTTP response:
+the agent proxy accepted CONNECT (HTTP/1.1 200 Connection Established) and then the tunnel was reset during the TLS handshake (curl exit 35).
+Retry of probe 1 (Origin: null), verbose:
+* Uses proxy env variable no_proxy == 'localhost,127.0.0.1,::1,127.0.0.0/8,0.0.0.0/8,::,169.254.0.0/16,api.anthropic.com,api-staging.anthropic.com,api-pr-preview.anthropic.com,mcp-proxy.anthropic.com,mcp-proxy-staging.anthropic.com,registry.npmjs.org,jsr.io,npm.jsr.io,pypi.org,files.pythonhosted.org,index.crates.io,proxy.golang.org,host.docker.internal,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,.svc.cluster.local,*.svc.cluster.local'
+* Uses proxy env variable https_proxy == 'http://127.0.0.1:39739'
+*   Trying 127.0.0.1:39739...
+* Connected to 127.0.0.1 (127.0.0.1) port 39739
+* CONNECT tunnel: HTTP/1.1 negotiated
+* allocate connect buffer
+* Establish HTTP proxy tunnel to api.adsb.lol:443
+> CONNECT api.adsb.lol:443 HTTP/1.1
+> Host: api.adsb.lol:443
+> User-Agent: curl/8.5.0
+> Proxy-Connection: Keep-Alive
+> 
+< HTTP/1.1 200 Connection Established
+< 
+* CONNECT phase completed
+* CONNECT tunnel established, response 200
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+*  CAfile: /root/.ccr/ca-bundle.crt
+*  CApath: /etc/ssl/certs
+* Recv failure: Connection reset by peer
+* OpenSSL SSL_connect: Connection reset by peer in connection to api.adsb.lol:443 
+* Closing connection
+curl: (35) Recv failure: Connection reset by peer
+curl exit code: 0
+
+Agent proxy status (recentRelayFailures, verbatim):
+[
+ {
+  "ts": "2026-11-17T07:13:41.924Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ },
+ {
+  "ts": "2026-11-17T07:13:55.298Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ },
+ {
+  "ts": "2026-11-17T07:14:07.583Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ },
+ {
+  "ts": "2026-11-17T07:14:19.872Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ },
+ {
+  "ts": "2026-11-17T07:14:33.582Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ },
+ {
+  "ts": "2026-11-17T07:14:45.879Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ },
+ {
+  "ts": "2026-11-17T07:15:11.467Z",
+  "kind": "ws_closed_mid_exchange",
+  "detail": "tunnel closed (code 1006) after 12s; 517 B sent, 39 B received, client reading, 0 B still queued in the relay",
+  "host": "api.adsb.lol:443"
+ }
+]
+
+Probe 6 follow-up (routeset POST for up to 5 widebody callsigns from probe 1): NOT RUN - probe 1 returned no data (api.adsb.lol unreachable), so no probe-1 widebody callsigns exist.
